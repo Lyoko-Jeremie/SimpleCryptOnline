@@ -45,7 +45,7 @@ async function testMakeFile() {
             }
             return d;
         },
-        // '123456789abcdefghijklmnopqrstuvwxyz123456789abcdefghijklmnopqrstuvwxyz123456789abcdefghijklmnopqrstuvwxyz123456789abcdefghijklmnopqrstuvwxyz123456789abcdefghijklmnopqrstuvwxyz123456789abcdefghijklmnopqrstuvwxyz',
+        '123456789abcdefghijklmnopqrstuvwxyz123456789abcdefghijklmnopqrstuvwxyz123456789abcdefghijklmnopqrstuvwxyz123456789abcdefghijklmnopqrstuvwxyz123456789abcdefghijklmnopqrstuvwxyz123456789abcdefghijklmnopqrstuvwxyz',
     );
 
     console.log('modMeta');
@@ -88,7 +88,7 @@ async function testReadFile() {
     // console.log('data', data.length);
     await reader.load(
         data,
-        // '123456789abcdefghijklmnopqrstuvwxyz123456789abcdefghijklmnopqrstuvwxyz123456789abcdefghijklmnopqrstuvwxyz123456789abcdefghijklmnopqrstuvwxyz123456789abcdefghijklmnopqrstuvwxyz123456789abcdefghijklmnopqrstuvwxyz',
+        '123456789abcdefghijklmnopqrstuvwxyz123456789abcdefghijklmnopqrstuvwxyz123456789abcdefghijklmnopqrstuvwxyz123456789abcdefghijklmnopqrstuvwxyz123456789abcdefghijklmnopqrstuvwxyz123456789abcdefghijklmnopqrstuvwxyz',
     );
     console.log('modMeta', reader.modMeta);
 
@@ -135,14 +135,14 @@ async function testReadFile() {
 }
 
 
-;(testMakeFile().catch(console.error));
-;(testReadFile().catch(console.error));
+// ;(testMakeFile().catch(console.error));
+// ;(testReadFile().catch(console.error));
 
-// ;(async () => {
-//     await testMakeFile();
-//     await testReadFile();
-//     console.log('Test completed successfully.');
-// })().catch(console.error);
+;(async () => {
+    await testMakeFile();
+    await testReadFile();
+    console.log('Test completed successfully.');
+})().catch(console.error);
 
 
 

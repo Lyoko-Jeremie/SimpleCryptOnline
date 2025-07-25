@@ -493,25 +493,53 @@ export class ModPackFileReader {
             console.error(`[ModPackFileReader] File ${filePath} end position exceeds mod pack buffer length`);
             throw new Error(`[ModPackFileReader] File ${filePath} end position exceeds mod pack buffer length`);
         }
-        const fileData = this.modPackBuffer.slice(fileStartPos, fileEndPos);
-        if (fileData.length !== fileMeta.l) {
-            console.error(`[ModPackFileReader] File ${filePath} data length mismatch: expected ${fileMeta.l}, got ${fileData.length}`);
-            throw new Error(`[ModPackFileReader] File ${filePath} data length mismatch: expected ${fileMeta.l}, got ${fileData.length}`);
+        if (!(this.xchacha20Key && this.xchacha20Nonce)) {
+            // If the mod pack is not encrypted, we can read the file data directly
+            const fileData = this.modPackBuffer.slice(fileStartPos, fileEndPos);
+            if (fileData.length !== fileMeta.l) {
+                console.error(`[ModPackFileReader] File ${filePath} data length mismatch: expected ${fileMeta.l}, got ${fileData.length}`);
+                throw new Error(`[ModPackFileReader] File ${filePath} data length mismatch: expected ${fileMeta.l}, got ${fileData.length}`);
+            }
+            return fileData;
         }
-        if (this.xchacha20Key && this.xchacha20Nonce) {
-            // Decrypt the file data if it is encrypted
-            const startBlockIndex = fileMeta.b;
-            // Use the block index as the counter for xchacha20
-            const decryptedFileData = crypto_stream_xchacha20_xor_ic(
-                fileData,
+
+        // If the mod pack is encrypted, we need to decrypt the file data block by block
+        const fileStartBlockIndex = fileMeta.b;
+        const fileEndBlockIndex = fileMeta.e;
+        if (fileStartBlockIndex < 0 || fileEndBlockIndex < fileStartBlockIndex || fileEndBlockIndex >= this.modPackBuffer.length / this.modMeta.blockSize) {
+            console.error(`[ModPackFileReader] Invalid file block index for ${filePath}: start ${fileStartBlockIndex}, end ${fileEndBlockIndex}`);
+            throw new Error(`[ModPackFileReader] Invalid file block index for ${filePath}: start ${fileStartBlockIndex}, end ${fileEndBlockIndex}`);
+        }
+        const fileData = new Uint8Array(fileMeta.l);
+        let offset = 0;
+        for (let blockIndex = fileStartBlockIndex; blockIndex <= fileEndBlockIndex; blockIndex++) {
+            const blockStartPos = Number(this.fileDataStartPos) + blockIndex * this.modMeta.blockSize;
+            const blockEndPos = blockStartPos + this.modMeta.blockSize;
+            if (blockEndPos > this.modPackBuffer.length) {
+                console.error(`[ModPackFileReader] Block ${blockIndex} end position exceeds mod pack buffer length`);
+                throw new Error(`[ModPackFileReader] Block ${blockIndex} end position exceeds mod pack buffer length`);
+            }
+            const blockData = this.modPackBuffer.slice(blockStartPos, blockEndPos);
+            if (blockData.length !== this.modMeta.blockSize) {
+                console.error(`[ModPackFileReader] Block ${blockIndex} data length mismatch: expected ${this.modMeta.blockSize}, got ${blockData.length}`);
+                throw new Error(`[ModPackFileReader] Block ${blockIndex} data length mismatch: expected ${this.modMeta.blockSize}, got ${blockData.length}`);
+            }
+            const decryptedBlockData = crypto_stream_xchacha20_xor_ic(
+                blockData,
                 this.xchacha20Nonce,
-                startBlockIndex,
+                blockIndex,
                 this.xchacha20Key,
                 'uint8array',
             );
-            return decryptedFileData;
+            fileData.set(decryptedBlockData, offset);
+            offset += decryptedBlockData.length;
         }
-        // If not encrypted, return the file data directly
+        // Check if the decrypted file data length matches the expected length
+        if (offset !== fileMeta.l) {
+            console.error(`[ModPackFileReader] Decrypted file ${filePath} data length mismatch: expected ${fileMeta.l}, got ${offset}`);
+            throw new Error(`[ModPackFileReader] Decrypted file ${filePath} data length mismatch: expected ${fileMeta.l}, got ${offset}`);
+        }
+        // Return the decrypted file data
         return fileData;
     }
 
