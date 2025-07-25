@@ -23,9 +23,11 @@ dist*
 i18n.json
 *.zip
 
-tools/test-*
+#tools/test-*
+tools/test-file/**/*
 webpack-tools-test.config.js
 *.mod.zip.crypt
 *.mod.zip.nonce
 *.mod.zip.salt
-
+*.modpack.crypt
+*.modpack
