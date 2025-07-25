@@ -37,15 +37,16 @@ export interface CryptoInfo {
     PwhashSaltBase64: string;
 }
 
-export const magicNumber = new Uint8Array([0x4A, 0x65, 0x72, 0x65, 0x6D, 0x69, 0x65, 0x4D, 0x6F, 0x64, 0x4C, 0x6F, 0x61, 0x64, 0x65, 0x72]);
+export const MagicNumber = new Uint8Array([0x4A, 0x65, 0x72, 0x65, 0x6D, 0x69, 0x65, 0x4D, 0x6F, 0x64, 0x4C, 0x6F, 0x61, 0x64, 0x65, 0x72]);
+export const ModMetaProtocolVersion = 1; // Version of the mod pack protocol
 
 export interface ModMeta {
     // magic number, 0x4A, 0x65, 0x72, 0x65, 0x6D, 0x69, 0x65, 0x4D, 0x6F, 0x64, 0x4C, 0x6F, 0x61, 0x64, 0x65, 0x72
     magicNumber: Uint8Array;
     // mod name
     name: string;
-    // PAK file protocol version
-    protocolVersion: string;
+    // PAK file protocol version ModMetaProtocolVersion
+    protocolVersion: number;
     // default: 64-byte . for xchacha20 fast lookup block
     blockSize: number;
     cryptoInfo?: CryptoInfo;
@@ -169,9 +170,9 @@ export async function covertFromZipMod(
     }
 
     const modMeta: ModMeta = {
-        magicNumber: magicNumber,
+        magicNumber: MagicNumber,
         name: modName,
-        protocolVersion: '1.0.0',
+        protocolVersion: ModMetaProtocolVersion,
         blockSize: blockSize,
         cryptoInfo: cryptoInfo,
         bootJsonFile: {
@@ -197,7 +198,7 @@ export async function covertFromZipMod(
 
     const modMetaBuffer = BSON.serialize(modMeta);
 
-    const magicNumberPadded = paddingToBlockSize(magicNumber, blockSize);
+    const magicNumberPadded = paddingToBlockSize(MagicNumber, blockSize);
     const modMetaBufferPadded = paddingToBlockSize(modMetaBuffer, blockSize);
 
     // Calculate the total file length
@@ -281,4 +282,150 @@ export async function covertFromZipMod(
         ext: cryptoInfo ? '.modpack.crypt' : '.modpack',
     };
 
+}
+
+export class ModPackFileReader {
+    constructor() {
+    }
+
+    password?: string;
+    modMeta!: ModMeta;
+    fileDataStartPos!: bigint;
+    xchacha20Key?: Uint8Array;
+    xchacha20Nonce?: Uint8Array;
+    private modPackBuffer!: Uint8Array;
+
+    protected async load(modPackBuffer: Uint8Array, password?: string): Promise<ModMeta> {
+        await ready;
+        this.modPackBuffer = modPackBuffer;
+        this.password = password;
+
+        const magicNumberLength = MagicNumber.length;
+        if (this.modPackBuffer.length < magicNumberLength + 8 + 8) {
+            throw new Error('Mod pack buffer is too short to contain mod meta');
+        }
+        const magicNumber = this.modPackBuffer.slice(0, magicNumberLength);
+        if (!magicNumber.every((value, index) => value === MagicNumber[index])) {
+            throw new Error('Invalid magic number in mod pack buffer');
+        }
+
+        const modMetaStartPos = magicNumberLength + 8 + 8; // magic
+        const dataView = new DataView(this.modPackBuffer.buffer);
+        const modMetaBufferLength = dataView.getBigUint64(magicNumberLength, true);
+        const fileDataStartPos = dataView.getBigUint64(magicNumberLength + 8, true);
+        const modMetaEndPos = modMetaStartPos + Number(modMetaBufferLength);
+        if (modMetaEndPos > this.modPackBuffer.length) {
+            console.error('[ModPackFileReader] Mod meta buffer is too short');
+            throw new Error('[ModPackFileReader] Mod meta buffer is too short');
+        }
+        const modMetaBuffer = this.modPackBuffer.slice(modMetaStartPos, modMetaEndPos);
+        const modMeta = BSON.deserialize(modMetaBuffer) as ModMeta;
+        if (!modMeta.magicNumber.every((value, index) => value === MagicNumber[index])) {
+            console.error('[ModPackFileReader] Invalid magic number in mod meta');
+            throw new Error('[ModPackFileReader] Invalid magic number in mod meta');
+        }
+
+        // check ModMeta valid
+        if (modMeta.protocolVersion !== ModMetaProtocolVersion) {
+            console.error(`[ModPackFileReader] Invalid mod meta protocol version: ${modMeta.protocolVersion}, expected: ${ModMetaProtocolVersion}`);
+            throw new Error(`[ModPackFileReader] Invalid mod meta protocol version: ${modMeta.protocolVersion}, expected: ${ModMetaProtocolVersion}`);
+        }
+        if (modMeta.blockSize <= 0 || modMeta.blockSize > 1024 * 1024 * 64 || modMeta.blockSize % 2 !== 0) {
+            console.error(`[ModPackFileReader] Invalid block size: ${modMeta.blockSize}`);
+            throw new Error(`[ModPackFileReader] Invalid block size: ${modMeta.blockSize}`);
+        }
+        if (modMeta.bootJsonFile.b < 0 || modMeta.bootJsonFile.e < modMeta.bootJsonFile.b || modMeta.bootJsonFile.l <= 0) {
+            console.error(`[ModPackFileReader] Invalid boot json file meta: ${JSON.stringify(modMeta.bootJsonFile)}`);
+            throw new Error(`[ModPackFileReader] Invalid boot json file meta: ${JSON.stringify(modMeta.bootJsonFile)}`);
+        }
+        for (const [filePath, fileMeta] of Object.entries(modMeta.fileMeta)) {
+            if (fileMeta.b < 0 || fileMeta.e < fileMeta.b || fileMeta.l <= 0) {
+                console.error(`[ModPackFileReader] Invalid file meta for ${filePath}: ${JSON.stringify(fileMeta)}`);
+                throw new Error(`[ModPackFileReader] Invalid file meta for ${filePath}: ${JSON.stringify(fileMeta)}`);
+            }
+        }
+
+        // check fileMeta not overlap
+        const fileMetaList = Object.values(modMeta.fileMeta);
+        fileMetaList.sort((a, b) => a.b - b.b); // Sort by begin index
+        for (let i = 0; i < fileMetaList.length - 1; i++) {
+            const current = fileMetaList[i];
+            const next = fileMetaList[i + 1];
+            if (current.e >= next.b) {
+                console.error(`[ModPackFileReader] File meta overlap detected between ${JSON.stringify(current)} and ${JSON.stringify(next)}`);
+                throw new Error(`[ModPackFileReader] File meta overlap detected between ${JSON.stringify(current)} and ${JSON.stringify(next)}`);
+            }
+        }
+
+        let xchacha20Key;
+        let xchacha20Nonce;
+        if (this.modMeta.cryptoInfo && this.password) {
+            if (!this.modMeta.cryptoInfo.Xchacha20NonceBase64 || !this.modMeta.cryptoInfo.PwhashSaltBase64) {
+                console.error('[ModPackFileReader] Crypto info is incomplete');
+                throw new Error('[ModPackFileReader] Crypto info is incomplete');
+            }
+            xchacha20Nonce = from_base64(this.modMeta.cryptoInfo.Xchacha20NonceBase64);
+            if (xchacha20Nonce.length !== crypto_stream_xchacha20_NONCEBYTES) {
+                console.error(`[ModPackFileReader] Invalid xchacha20 nonce length: ${xchacha20Nonce.length}, expected: ${crypto_stream_xchacha20_NONCEBYTES}`);
+                throw new Error(`[ModPackFileReader] Invalid xchacha20 nonce length: ${xchacha20Nonce.length}, expected: ${crypto_stream_xchacha20_NONCEBYTES}`);
+            }
+            const pwhashSalt = from_base64(this.modMeta.cryptoInfo.PwhashSaltBase64);
+            if (pwhashSalt.length !== crypto_pwhash_SALTBYTES) {
+                console.error(`[ModPackFileReader] Invalid pwhash salt length: ${pwhashSalt.length}, expected: ${crypto_pwhash_SALTBYTES}`);
+                throw new Error(`[ModPackFileReader] Invalid pwhash salt length: ${pwhashSalt.length}, expected: ${crypto_pwhash_SALTBYTES}`);
+            }
+
+            xchacha20Key = crypto_pwhash(
+                crypto_stream_xchacha20_KEYBYTES,
+                this.password,
+                pwhashSalt,
+                crypto_pwhash_OPSLIMIT_INTERACTIVE,
+                crypto_pwhash_MEMLIMIT_INTERACTIVE,
+                crypto_pwhash_ALG_DEFAULT,
+                'uint8array',
+            );
+        }
+
+        // ok
+        this.modMeta = modMeta;
+        this.fileDataStartPos = fileDataStartPos;
+        this.xchacha20Key = xchacha20Key;
+        this.xchacha20Nonce = xchacha20Nonce;
+        return modMeta;
+    }
+
+    public async getFile(filePath: string): Promise<Uint8Array | undefined> {
+        await ready;
+        if (!this.modMeta.fileMeta[filePath]) {
+            console.warn(`[ModPackFileReader] File ${filePath} not found in mod meta`);
+            return undefined;
+        }
+        const fileMeta = this.modMeta.fileMeta[filePath];
+        const fileStartPos = Number(this.fileDataStartPos) + fileMeta.b * this.modMeta.blockSize;
+        const fileEndPos = fileStartPos + fileMeta.l;
+        if (fileEndPos > this.modPackBuffer.length) {
+            console.error(`[ModPackFileReader] File ${filePath} end position exceeds mod pack buffer length`);
+            throw new Error(`[ModPackFileReader] File ${filePath} end position exceeds mod pack buffer length`);
+        }
+        const fileData = this.modPackBuffer.slice(fileStartPos, fileEndPos);
+        if (fileData.length !== fileMeta.l) {
+            console.error(`[ModPackFileReader] File ${filePath} data length mismatch: expected ${fileMeta.l}, got ${fileData.length}`);
+            throw new Error(`[ModPackFileReader] File ${filePath} data length mismatch: expected ${fileMeta.l}, got ${fileData.length}`);
+        }
+        if (this.xchacha20Key && this.xchacha20Nonce) {
+            // Decrypt the file data if it is encrypted
+            const startBlockIndex = fileMeta.b;
+            // Use the block index as the counter for xchacha20
+            const decryptedFileData = crypto_stream_xchacha20_xor_ic(
+                fileData,
+                this.xchacha20Nonce,
+                startBlockIndex,
+                this.xchacha20Key,
+                'uint8array',
+            );
+            return decryptedFileData;
+        }
+        // If not encrypted, return the file data directly
+        return fileData;
+    }
 }
