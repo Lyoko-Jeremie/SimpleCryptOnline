@@ -39,10 +39,12 @@ export interface CryptoInfo {
 
 export const MagicNumber = new Uint8Array([0x4A, 0x65, 0x72, 0x65, 0x6D, 0x69, 0x65, 0x4D, 0x6F, 0x64, 0x4C, 0x6F, 0x61, 0x64, 0x65, 0x72]);
 export const ModMetaProtocolVersion = 1; // Version of the mod pack protocol
+export const BlockSize = 64; // default block size
 
 export interface ModMeta {
     // magic number, 0x4A, 0x65, 0x72, 0x65, 0x6D, 0x69, 0x65, 0x4D, 0x6F, 0x64, 0x4C, 0x6F, 0x61, 0x64, 0x65, 0x72
-    magicNumber: Uint8Array;
+    // to_base64(MagicNumber)
+    magicNumber: string;
     // mod name
     name: string;
     // PAK file protocol version ModMetaProtocolVersion
@@ -113,7 +115,6 @@ export async function covertFromZipMod(
         throw new Error('filePathList has duplicate entries');
     }
 
-    const blockSize = 64; // default block size
 
     let cryptoInfo: CryptoInfo | undefined;
     if (password) {
@@ -150,7 +151,7 @@ export async function covertFromZipMod(
     }
     let bootJsonFile = paddingToBlockSize(
         bootFile,
-        blockSize,
+        BlockSize,
     );
     bootJsonFile['filePath'] = bootFilePath;
 
@@ -163,17 +164,17 @@ export async function covertFromZipMod(
         }
         const fileBlock = paddingToBlockSize(
             fileData,
-            blockSize,
+            BlockSize,
         );
         fileBlock['filePath'] = filePath;
         fileBlockList.push(fileBlock);
     }
 
     const modMeta: ModMeta = {
-        magicNumber: MagicNumber,
+        magicNumber: to_base64(MagicNumber),
         name: modName,
         protocolVersion: ModMetaProtocolVersion,
-        blockSize: blockSize,
+        blockSize: BlockSize,
         cryptoInfo: cryptoInfo,
         bootJsonFile: {
             b: 0,
@@ -197,14 +198,16 @@ export async function covertFromZipMod(
     }
 
     const modMetaBuffer = BSON.serialize(modMeta);
+    // console.log('modMetaBuffer length:', modMetaBuffer.length);
+    // console.log(modMetaBuffer);
 
-    const magicNumberPadded = paddingToBlockSize(MagicNumber, blockSize);
-    const modMetaBufferPadded = paddingToBlockSize(modMetaBuffer, blockSize);
+    const magicNumberPadded = paddingToBlockSize(MagicNumber, BlockSize);
+    const modMetaBufferPadded = paddingToBlockSize(modMetaBuffer, BlockSize);
 
     // Calculate the total file length
-    // magicNumber (16 bytes) + 8 bytes modMetaBuffer start pos + 8 bytes all file data start pos
+    // magicNumber (16 bytes) + 8 bytes modMetaBuffer start pos + 8 bytes modMetaBuffer end pos + 8 bytes all file data start pos
     // + modMetaBuffer + (boot file data + all file data)
-    const fileLength = magicNumberPadded.paddedDataLength + 8 + 8 + modMetaBufferPadded.paddedDataLength + bootJsonFile.paddedDataLength + fileBlockList.reduce((acc, block) => acc + block.paddedDataLength, 0);
+    const fileLength = magicNumberPadded.paddedDataLength + 8 + 8 + 8 + modMetaBufferPadded.paddedDataLength + bootJsonFile.paddedDataLength + fileBlockList.reduce((acc, block) => acc + block.paddedDataLength, 0);
 
     // console.log('fileLength', fileLength);
 
@@ -217,10 +220,12 @@ export async function covertFromZipMod(
     offset += magicNumberPadded.paddedDataLength;
     // console.log('offset', offset);
     const dataView = new DataView(modPackBuffer.buffer);
-    dataView.setBigUint64(offset, BigInt(magicNumberPadded.paddedDataLength + 8 + 8), true); // modMetaBuffer start pos
+    dataView.setBigUint64(offset, BigInt(magicNumberPadded.paddedDataLength + 8 + 8 + 8), true); // modMetaBuffer start pos
+    offset += 8;
+    dataView.setBigUint64(offset, BigInt(magicNumberPadded.paddedDataLength + 8 + 8 + 8 + modMetaBuffer.length), true); // modMetaBuffer end pos
     offset += 8;
     // console.log('offset', offset);
-    dataView.setBigUint64(offset, BigInt(magicNumberPadded.paddedDataLength + 8 + 8 + modMetaBufferPadded.paddedDataLength), true); // all file data start pos
+    dataView.setBigUint64(offset, BigInt(magicNumberPadded.paddedDataLength + 8 + 8 + 8 + modMetaBufferPadded.paddedDataLength), true); // all file data start pos
     offset += 8;
     // console.log('offset', offset, modMetaBufferPadded.paddedData.length, modMetaBufferPadded.paddedDataLength);
     modPackBuffer.set(modMetaBufferPadded.paddedData, offset);
@@ -264,17 +269,17 @@ export async function covertFromZipMod(
 
     let blockPosIndex = 0;
     const blockIndexLast = bockIndex;
-    const startPos = magicNumberPadded.paddedDataLength + 8 + 8 + modMetaBufferPadded.paddedDataLength;
+    const startPos = magicNumberPadded.paddedDataLength + 8 + 8 + 8 + modMetaBufferPadded.paddedDataLength;
     for (let blockIndex = 0; blockIndex < blockIndexLast; blockIndex++) {
 
-        const blockStartPos = startPos + blockPosIndex * blockSize;
-        const blockEndPos = blockStartPos + blockSize;
+        const blockStartPos = startPos + blockPosIndex * BlockSize;
+        const blockEndPos = blockStartPos + BlockSize;
         const blockData = modPackBuffer.slice(blockStartPos, blockEndPos);
-        if (blockData.length < blockSize) {
+        if (blockData.length < BlockSize) {
             // If the last block is not full
             // this will never happen
-            console.warn(`Block data length is less than block size: ${blockData.length} < ${blockSize}`);
-            throw new Error(`Block data length is less than block size: ${blockData.length} < ${blockSize}`);
+            console.warn(`Block data length is less than block size: ${blockData.length} < ${BlockSize}`);
+            throw new Error(`Block data length is less than block size: ${blockData.length} < ${BlockSize}`);
         }
         const encryptedBlock = crypto_stream_xchacha20_xor_ic(
             blockData,
@@ -306,32 +311,41 @@ export class ModPackFileReader {
     xchacha20Nonce?: Uint8Array;
     private modPackBuffer!: Uint8Array;
 
-    protected async load(modPackBuffer: Uint8Array, password?: string): Promise<ModMeta> {
+    public async load(modPackBuffer: Uint8Array, password?: string): Promise<ModMeta> {
         await ready;
         this.modPackBuffer = modPackBuffer;
         this.password = password;
 
-        const magicNumberLength = MagicNumber.length;
-        if (this.modPackBuffer.length < magicNumberLength + 8 + 8) {
+        const magicNumberLength = Math.ceil(MagicNumber.length / BlockSize) * BlockSize; // Ensure magic number is padded to block size
+        if (this.modPackBuffer.length < magicNumberLength + 8 + 8 + 8) {
             throw new Error('Mod pack buffer is too short to contain mod meta');
         }
-        const magicNumber = this.modPackBuffer.slice(0, magicNumberLength);
+        const magicNumber = this.modPackBuffer.slice(0, MagicNumber.length);
         if (!magicNumber.every((value, index) => value === MagicNumber[index])) {
             throw new Error('Invalid magic number in mod pack buffer');
         }
 
-        const modMetaStartPos = magicNumberLength + 8 + 8; // magic
+        // const modMetaStartPos = magicNumberLength + 8 + 8 + 8; // magic
         const dataView = new DataView(this.modPackBuffer.buffer);
-        const modMetaBufferLength = dataView.getBigUint64(magicNumberLength, true);
-        const fileDataStartPos = dataView.getBigUint64(magicNumberLength + 8, true);
-        const modMetaEndPos = modMetaStartPos + Number(modMetaBufferLength);
-        if (modMetaEndPos > this.modPackBuffer.length) {
-            console.error('[ModPackFileReader] Mod meta buffer is too short');
-            throw new Error('[ModPackFileReader] Mod meta buffer is too short');
+        const modMetaBufferStartPos = dataView.getBigUint64(magicNumberLength, true);
+        const modMetaBufferEndPos = dataView.getBigUint64(magicNumberLength + 8, true);
+        const fileDataStartPos = dataView.getBigUint64(magicNumberLength + 8 + 8, true);
+        const modMetaBufferLength = modMetaBufferEndPos - modMetaBufferStartPos;
+        // console.log('[ModPackFileReader] modMetaBufferStartPos:', modMetaBufferStartPos);
+        // console.log('[ModPackFileReader] modMetaBufferEndPos:', modMetaBufferEndPos);
+        // console.log('[ModPackFileReader] fileDataStartPos:', fileDataStartPos);
+        // console.log('[ModPackFileReader] modMetaBufferLength:', modMetaBufferLength);
+        if (modMetaBufferEndPos + modMetaBufferLength > this.modPackBuffer.length) {
+            console.error('[ModPackFileReader] Mod buffer is too short');
+            throw new Error('[ModPackFileReader] Mod buffer is too short');
         }
-        const modMetaBuffer = this.modPackBuffer.slice(modMetaStartPos, modMetaEndPos);
+        const modMetaBuffer = this.modPackBuffer.slice(Number(modMetaBufferStartPos), Number(modMetaBufferEndPos));
+        // console.log('[ModPackFileReader] modMetaBuffer length:', modMetaBuffer.length);
+        // console.log(modMetaBuffer);
         const modMeta = BSON.deserialize(modMetaBuffer) as ModMeta;
-        if (!modMeta.magicNumber.every((value, index) => value === MagicNumber[index])) {
+        // console.log('[ModPackFileReader] modMeta:', modMeta);
+        // console.log('[ModPackFileReader] modMeta.magicNumber:', from_base64(modMeta.magicNumber));
+        if (!from_base64(modMeta.magicNumber).every((value, index) => value === MagicNumber[index])) {
             console.error('[ModPackFileReader] Invalid magic number in mod meta');
             throw new Error('[ModPackFileReader] Invalid magic number in mod meta');
         }
@@ -370,17 +384,17 @@ export class ModPackFileReader {
 
         let xchacha20Key;
         let xchacha20Nonce;
-        if (this.modMeta.cryptoInfo && this.password) {
-            if (!this.modMeta.cryptoInfo.Xchacha20NonceBase64 || !this.modMeta.cryptoInfo.PwhashSaltBase64) {
+        if (modMeta.cryptoInfo && password) {
+            if (!modMeta.cryptoInfo.Xchacha20NonceBase64 || !modMeta.cryptoInfo.PwhashSaltBase64) {
                 console.error('[ModPackFileReader] Crypto info is incomplete');
                 throw new Error('[ModPackFileReader] Crypto info is incomplete');
             }
-            xchacha20Nonce = from_base64(this.modMeta.cryptoInfo.Xchacha20NonceBase64);
+            xchacha20Nonce = from_base64(modMeta.cryptoInfo.Xchacha20NonceBase64);
             if (xchacha20Nonce.length !== crypto_stream_xchacha20_NONCEBYTES) {
                 console.error(`[ModPackFileReader] Invalid xchacha20 nonce length: ${xchacha20Nonce.length}, expected: ${crypto_stream_xchacha20_NONCEBYTES}`);
                 throw new Error(`[ModPackFileReader] Invalid xchacha20 nonce length: ${xchacha20Nonce.length}, expected: ${crypto_stream_xchacha20_NONCEBYTES}`);
             }
-            const pwhashSalt = from_base64(this.modMeta.cryptoInfo.PwhashSaltBase64);
+            const pwhashSalt = from_base64(modMeta.cryptoInfo.PwhashSaltBase64);
             if (pwhashSalt.length !== crypto_pwhash_SALTBYTES) {
                 console.error(`[ModPackFileReader] Invalid pwhash salt length: ${pwhashSalt.length}, expected: ${crypto_pwhash_SALTBYTES}`);
                 throw new Error(`[ModPackFileReader] Invalid pwhash salt length: ${pwhashSalt.length}, expected: ${crypto_pwhash_SALTBYTES}`);
@@ -388,7 +402,7 @@ export class ModPackFileReader {
 
             xchacha20Key = crypto_pwhash(
                 crypto_stream_xchacha20_KEYBYTES,
-                this.password,
+                password,
                 pwhashSalt,
                 crypto_pwhash_OPSLIMIT_INTERACTIVE,
                 crypto_pwhash_MEMLIMIT_INTERACTIVE,
@@ -405,13 +419,19 @@ export class ModPackFileReader {
         return modMeta;
     }
 
-    public async getFile(filePath: string): Promise<Uint8Array | undefined> {
-        await ready;
-        if (!this.modMeta.fileMeta[filePath]) {
-            console.warn(`[ModPackFileReader] File ${filePath} not found in mod meta`);
-            return undefined;
+    getFileList(): string[] {
+        const fileList: string[] = [];
+        for (const filePath in this.modMeta.fileMeta) {
+            if (this.modMeta.fileMeta.hasOwnProperty(filePath)) {
+                fileList.push(filePath);
+            }
         }
-        const fileMeta = this.modMeta.fileMeta[filePath];
+        return fileList;
+    }
+
+    protected async getFileByMeta(fileMeta: FileMeta, filePath: string): Promise<Uint8Array | undefined> {
+        await ready;
+
         const fileStartPos = Number(this.fileDataStartPos) + fileMeta.b * this.modMeta.blockSize;
         const fileEndPos = fileStartPos + fileMeta.l;
         if (fileEndPos > this.modPackBuffer.length) {
@@ -438,5 +458,23 @@ export class ModPackFileReader {
         }
         // If not encrypted, return the file data directly
         return fileData;
+    }
+
+    public async getFile(filePath: string): Promise<Uint8Array | undefined> {
+        if (!this.modMeta.fileMeta[filePath]) {
+            console.warn(`[ModPackFileReader] File ${filePath} not found in mod meta`);
+            return undefined;
+        }
+        const fileMeta = this.modMeta.fileMeta[filePath];
+        return this.getFileByMeta(fileMeta, filePath);
+    }
+
+    public async readFile(filePath: string): Promise<Uint8Array | undefined> {
+        return this.getFile(filePath);
+    }
+
+    public async getBootJson(): Promise<Uint8Array | undefined> {
+        await ready;
+        return this.getFileByMeta(this.modMeta.bootJsonFile, 'boot.json');
     }
 }
