@@ -45,7 +45,7 @@ async function testMakeFile() {
             }
             return d;
         },
-        '123456789abcdefghijklmnopqrstuvwxyz123456789abcdefghijklmnopqrstuvwxyz123456789abcdefghijklmnopqrstuvwxyz123456789abcdefghijklmnopqrstuvwxyz123456789abcdefghijklmnopqrstuvwxyz123456789abcdefghijklmnopqrstuvwxyz',
+        // '123456789abcdefghijklmnopqrstuvwxyz123456789abcdefghijklmnopqrstuvwxyz123456789abcdefghijklmnopqrstuvwxyz123456789abcdefghijklmnopqrstuvwxyz123456789abcdefghijklmnopqrstuvwxyz123456789abcdefghijklmnopqrstuvwxyz',
     );
 
     console.log('modMeta');
@@ -77,8 +77,8 @@ async function testReadFile() {
     const reader = new ModPackFileReader();
     const filePath = join(
         'tools/test-file',
-        // 'testMod.modpack',
-        'testMod.modpack.crypt',
+        'testMod.modpack',
+        // 'testMod.modpack.crypt',
     );
     const data = await readFile(filePath);
     if (!data || data.length === 0) {
@@ -88,14 +88,19 @@ async function testReadFile() {
     // console.log('data', data.length);
     await reader.load(
         data,
-        '123456789abcdefghijklmnopqrstuvwxyz123456789abcdefghijklmnopqrstuvwxyz123456789abcdefghijklmnopqrstuvwxyz123456789abcdefghijklmnopqrstuvwxyz123456789abcdefghijklmnopqrstuvwxyz123456789abcdefghijklmnopqrstuvwxyz',
+        // '123456789abcdefghijklmnopqrstuvwxyz123456789abcdefghijklmnopqrstuvwxyz123456789abcdefghijklmnopqrstuvwxyz123456789abcdefghijklmnopqrstuvwxyz123456789abcdefghijklmnopqrstuvwxyz123456789abcdefghijklmnopqrstuvwxyz',
     );
     console.log('modMeta', reader.modMeta);
 
     const fileTree = await reader.getFileTree();
     console.log('fileTree', fileTree);
 
-    console.log('checkValid', await reader.checkValid());
+    const checkValid = await reader.checkValid();
+    console.log('checkValid', checkValid);
+    if (!checkValid) {
+        console.error('Mod pack is not valid.');
+        throw new Error('Mod pack is not valid.');
+    }
 
     // compare the file list
     const fileList = reader.getFileList();

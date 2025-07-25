@@ -536,9 +536,9 @@ export class ModPackFileReader {
                 this.xchacha20Key,
                 'uint8array',
             );
-            console.log('offset', offset);
-            console.log('fileData', fileData.length);
-            console.log('decryptedBlockData', decryptedBlockData.length);
+            // console.log('offset', offset);
+            // console.log('fileData', fileData.length);
+            // console.log('decryptedBlockData', decryptedBlockData.length);
             fileData.set(decryptedBlockData, offset);
             offset += decryptedBlockData.length;
         }
@@ -605,6 +605,13 @@ export class ModPackFileReader {
             // Check if xchacha20Key and xchacha20Nonce are set if password is provided
             if (this.password && !(this.xchacha20Key && this.xchacha20Nonce)) {
                 console.error('[ModPackFileReader] Xchacha20 key or nonce not set');
+                console.log('[ModPackFileReader] password', this.password);
+                console.log('[ModPackFileReader] xchacha20Key', this.xchacha20Key);
+                console.log('[ModPackFileReader] xchacha20Nonce', this.xchacha20Nonce);
+                return false;
+            }
+            if (!this.password && (this.xchacha20Key || this.xchacha20Nonce)) {
+                console.error('[ModPackFileReader] Xchacha20 key or nonce set without password');
                 console.log('[ModPackFileReader] password', this.password);
                 console.log('[ModPackFileReader] xchacha20Key', this.xchacha20Key);
                 console.log('[ModPackFileReader] xchacha20Nonce', this.xchacha20Nonce);
