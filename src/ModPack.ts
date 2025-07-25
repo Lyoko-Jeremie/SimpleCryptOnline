@@ -20,6 +20,21 @@ import {
 } from 'libsodium-wrappers-sumo';
 
 
+// 文件结构
+// 每一个部分都对齐到 BlockSize ， 不满足的数据在末尾padding随机字符串
+// ----------
+// block -1 : 文件头魔数 MagicNumber ：JeremieModLoader
+// 三个 8byte 长度数据(bigint) : ModMeta开始位置(byte)， ModMeta结束位置(byte)， 所有文件数据开始位置(byte)
+// block -1 : BSON(ModMeta)
+// block 0 ~ n-1 : 文件数据
+// block n : BSON(文件树 file tree) 文件树数据被作为一个文件对待。
+// ----------
+// 在加密模式下，block 0 ~ n 的所有文件数据部分都使用 crypto_stream_xchacha20_xor_ic 流加密模式加密
+// 文件头和 ModMeta 部分不加密， 每一个文件都对其到 BlockSize ， 而 BlockSize 是 crypto_stream_xchacha20_xor_ic 块大小
+// 利用 crypto_stream_xchacha20_xor_ic 可以按块计算和解密的特性，实现随机文件访问和读取
+// 加密时可以原位加密，解密时只发生一次数据拷贝
+
+
 export interface FileMeta {
     // begin block index
     b: number;
