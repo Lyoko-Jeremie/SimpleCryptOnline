@@ -77,8 +77,8 @@ async function testReadFile() {
     const reader = new ModPackFileReader();
     const filePath = join(
         'tools/test-file',
-        'testMod.modpack',
-        // 'testMod.modpack.crypt',
+        // 'testMod.modpack',
+        'testMod.modpack.crypt',
     );
     const data = await readFile(filePath);
     if (!data || data.length === 0) {
@@ -94,6 +94,8 @@ async function testReadFile() {
 
     const fileTree = await reader.getFileTree();
     console.log('fileTree', fileTree);
+
+    console.log('checkValid', await reader.checkValid());
 
     // compare the file list
     const fileList = reader.getFileList();

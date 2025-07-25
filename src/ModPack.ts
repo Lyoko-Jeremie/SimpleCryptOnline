@@ -1,4 +1,4 @@
-import {} from 'lodash';
+import {isEqual} from 'lodash';
 import {BSON} from 'bson';
 
 import {
@@ -115,6 +115,22 @@ function paddingToBlockSize(data: Uint8Array, blockSize: number): {
     };
 }
 
+function createFileTreeFromFileList(fileList: string[]) {
+    const fileTree: Record<string, any> = {};
+    for (const filePath of fileList) {
+        const parts = filePath.split(/[\/\\]/);
+        let current = fileTree;
+        for (const part of parts) {
+            if (!current[part]) {
+                current[part] = {};
+            }
+            current = current[part];
+        }
+        current['_f_'] = true; // Mark as a file
+    }
+    return fileTree;
+}
+
 export async function covertFromZipMod(
     modName: string,
     filePathList: string[],
@@ -133,18 +149,7 @@ export async function covertFromZipMod(
     }
 
     // make file tree from filePathList
-    const fileTree: Record<string, any> = {};
-    for (const filePath of filePathList) {
-        const parts = filePath.split(/[\/\\]/);
-        let current = fileTree;
-        for (const part of parts) {
-            if (!current[part]) {
-                current[part] = {};
-            }
-            current = current[part];
-        }
-        current['_f_'] = true; // Mark as a file
-    }
+    const fileTree = createFileTreeFromFileList(filePathList);
     console.log('fileTree', JSON.stringify(fileTree, null, 2));
     const fileTreeBuffer = BSON.serialize(fileTree);
     const fileTreeBufferPadded = paddingToBlockSize(
@@ -328,7 +333,7 @@ export async function covertFromZipMod(
 
         const blockStartPos = startPos + blockPosIndex * BlockSize;
         const blockEndPos = blockStartPos + BlockSize;
-        const blockData = modPackBuffer.slice(blockStartPos, blockEndPos);
+        const blockData = modPackBuffer.subarray(blockStartPos, blockEndPos);
         if (blockData.length < BlockSize) {
             // If the last block is not full
             // this will never happen
@@ -375,7 +380,7 @@ export class ModPackFileReader {
         if (this.modPackBuffer.length < magicNumberLength + 8 + 8 + 8) {
             throw new Error('Mod pack buffer is too short to contain mod meta');
         }
-        const magicNumber = this.modPackBuffer.slice(0, MagicNumber.length);
+        const magicNumber = this.modPackBuffer.subarray(0, MagicNumber.length);
         if (!magicNumber.every((value, index) => value === MagicNumber[index])) {
             throw new Error('Invalid magic number in mod pack buffer');
         }
@@ -394,7 +399,7 @@ export class ModPackFileReader {
             console.error('[ModPackFileReader] Mod buffer is too short');
             throw new Error('[ModPackFileReader] Mod buffer is too short');
         }
-        const modMetaBuffer = this.modPackBuffer.slice(Number(modMetaBufferStartPos), Number(modMetaBufferEndPos));
+        const modMetaBuffer = this.modPackBuffer.subarray(Number(modMetaBufferStartPos), Number(modMetaBufferEndPos));
         // console.log('[ModPackFileReader] modMetaBuffer length:', modMetaBuffer.length);
         // console.log(modMetaBuffer);
         const modMeta = BSON.deserialize(modMetaBuffer) as ModMeta;
@@ -495,7 +500,7 @@ export class ModPackFileReader {
         }
         if (!(this.xchacha20Key && this.xchacha20Nonce)) {
             // If the mod pack is not encrypted, we can read the file data directly
-            const fileData = this.modPackBuffer.slice(fileStartPos, fileEndPos);
+            const fileData = this.modPackBuffer.subarray(fileStartPos, fileEndPos);
             if (fileData.length !== fileMeta.l) {
                 console.error(`[ModPackFileReader] File ${filePath} data length mismatch: expected ${fileMeta.l}, got ${fileData.length}`);
                 throw new Error(`[ModPackFileReader] File ${filePath} data length mismatch: expected ${fileMeta.l}, got ${fileData.length}`);
@@ -510,7 +515,7 @@ export class ModPackFileReader {
             console.error(`[ModPackFileReader] Invalid file block index for ${filePath}: start ${fileStartBlockIndex}, end ${fileEndBlockIndex}`);
             throw new Error(`[ModPackFileReader] Invalid file block index for ${filePath}: start ${fileStartBlockIndex}, end ${fileEndBlockIndex}`);
         }
-        const fileData = new Uint8Array(fileMeta.l);
+        const fileData = new Uint8Array(Number(fileEndBlockIndex - fileStartBlockIndex + 1) * this.modMeta.blockSize);
         let offset = 0;
         for (let blockIndex = fileStartBlockIndex; blockIndex <= fileEndBlockIndex; blockIndex++) {
             const blockStartPos = Number(this.fileDataStartPos) + blockIndex * this.modMeta.blockSize;
@@ -519,7 +524,7 @@ export class ModPackFileReader {
                 console.error(`[ModPackFileReader] Block ${blockIndex} end position exceeds mod pack buffer length`);
                 throw new Error(`[ModPackFileReader] Block ${blockIndex} end position exceeds mod pack buffer length`);
             }
-            const blockData = this.modPackBuffer.slice(blockStartPos, blockEndPos);
+            const blockData = this.modPackBuffer.subarray(blockStartPos, blockEndPos);
             if (blockData.length !== this.modMeta.blockSize) {
                 console.error(`[ModPackFileReader] Block ${blockIndex} data length mismatch: expected ${this.modMeta.blockSize}, got ${blockData.length}`);
                 throw new Error(`[ModPackFileReader] Block ${blockIndex} data length mismatch: expected ${this.modMeta.blockSize}, got ${blockData.length}`);
@@ -531,16 +536,19 @@ export class ModPackFileReader {
                 this.xchacha20Key,
                 'uint8array',
             );
+            console.log('offset', offset);
+            console.log('fileData', fileData.length);
+            console.log('decryptedBlockData', decryptedBlockData.length);
             fileData.set(decryptedBlockData, offset);
             offset += decryptedBlockData.length;
         }
         // Check if the decrypted file data length matches the expected length
-        if (offset !== fileMeta.l) {
+        if (offset < fileMeta.l) {
             console.error(`[ModPackFileReader] Decrypted file ${filePath} data length mismatch: expected ${fileMeta.l}, got ${offset}`);
             throw new Error(`[ModPackFileReader] Decrypted file ${filePath} data length mismatch: expected ${fileMeta.l}, got ${offset}`);
         }
         // Return the decrypted file data
-        return fileData;
+        return fileData.subarray(0, fileMeta.l); // Trim to the expected length
     }
 
     public async getFile(filePath: string): Promise<Uint8Array | undefined> {
@@ -578,6 +586,49 @@ export class ModPackFileReader {
         } catch (error) {
             console.error('[ModPackFileReader] Failed to deserialize file tree:', error);
             throw error;
+        }
+    }
+
+    public async checkValid(): Promise<boolean> {
+        await ready;
+        try {
+            // Check if modMeta is loaded
+            if (!this.modMeta) {
+                console.error('[ModPackFileReader] Mod meta not loaded');
+                return false;
+            }
+            // Check if fileDataStartPos is set
+            if (this.fileDataStartPos === undefined) {
+                console.error('[ModPackFileReader] File data start position not set');
+                return false;
+            }
+            // Check if xchacha20Key and xchacha20Nonce are set if password is provided
+            if (this.password && !(this.xchacha20Key && this.xchacha20Nonce)) {
+                console.error('[ModPackFileReader] Xchacha20 key or nonce not set');
+                console.log('[ModPackFileReader] password', this.password);
+                console.log('[ModPackFileReader] xchacha20Key', this.xchacha20Key);
+                console.log('[ModPackFileReader] xchacha20Nonce', this.xchacha20Nonce);
+                return false;
+            }
+            // check file tree compare with file list
+            const fileTree = await this.getFileTree();
+            if (!fileTree) {
+                console.error('[ModPackFileReader] File tree not loaded');
+                return false;
+            }
+            const fileList = this.getFileList();
+            const fileTreeCheck = createFileTreeFromFileList(fileList);
+            if (!isEqual(fileTree, fileTreeCheck)) {
+                console.error('[ModPackFileReader] File tree does not match file list');
+                console.error('File tree:', JSON.stringify(fileTree, null, 2));
+                console.error('File tree check:', JSON.stringify(fileTreeCheck, null, 2));
+                return false;
+            }
+            // If all checks passed, return true
+            return true;
+        } catch (error) {
+            console.error('[ModPackFileReader] Error checking validity:', error);
+            return false;
         }
     }
 }
