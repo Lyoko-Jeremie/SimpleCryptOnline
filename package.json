@@ -9,7 +9,9 @@
     "webpack:tools:w": "webpack -w -c ./webpack-tools.config.js",
     "======================1": "",
     "build:webpack": "webpack -c ./webpack.config.js",
-    "webpack:tools": "webpack -c ./webpack-tools.config.js"
+    "webpack:tools": "webpack -c ./webpack-tools.config.js",
+    "======================2": "",
+    "test:ModPack": "tsx ./tools/test-ModPack.ts"
   },
   "dependencies": {
     "bootstrap": "^5.3.1",
