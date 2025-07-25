@@ -52,6 +52,8 @@ export interface ModMeta {
     // default: 64-byte . for xchacha20 fast lookup block
     blockSize: number;
     cryptoInfo?: CryptoInfo;
+    // the file tree
+    fileTreeBlock: FileMeta;
     // the boot.json file meta
     bootJsonFile: FileMeta;
     // <filepath , FileMeta>
@@ -115,6 +117,26 @@ export async function covertFromZipMod(
         throw new Error('filePathList has duplicate entries');
     }
 
+    // make file tree from filePathList
+    const fileTree: Record<string, any> = {};
+    for (const filePath of filePathList) {
+        const parts = filePath.split(/[\/\\]/);
+        let current = fileTree;
+        for (const part of parts) {
+            if (!current[part]) {
+                current[part] = {};
+            }
+            current = current[part];
+        }
+        current['_f_'] = true; // Mark as a file
+    }
+    console.log('fileTree', JSON.stringify(fileTree, null, 2));
+    const fileTreeBuffer = BSON.serialize(fileTree);
+    const fileTreeBufferPadded = paddingToBlockSize(
+        fileTreeBuffer,
+        BlockSize,
+    );
+
 
     let cryptoInfo: CryptoInfo | undefined;
     if (password) {
@@ -176,6 +198,11 @@ export async function covertFromZipMod(
         protocolVersion: ModMetaProtocolVersion,
         blockSize: BlockSize,
         cryptoInfo: cryptoInfo,
+        fileTreeBlock: {
+            b: 0,
+            e: fileTreeBufferPadded.blocks + 0,
+            l: fileTreeBufferPadded.dataLength,
+        },
         bootJsonFile: {
             b: 0,
             e: bootJsonFile.blocks - 1,
@@ -197,6 +224,11 @@ export async function covertFromZipMod(
         bockIndex += fileBlock.blocks;
     }
 
+    modMeta.fileTreeBlock.b = bockIndex;
+    modMeta.fileTreeBlock.e = bockIndex + fileTreeBufferPadded.blocks - 1;
+    modMeta.fileTreeBlock.l = fileTreeBufferPadded.dataLength;
+    bockIndex += fileTreeBufferPadded.blocks;
+
     const modMetaBuffer = BSON.serialize(modMeta);
     // console.log('modMetaBuffer length:', modMetaBuffer.length);
     // console.log(modMetaBuffer);
@@ -207,7 +239,11 @@ export async function covertFromZipMod(
     // Calculate the total file length
     // magicNumber (16 bytes) + 8 bytes modMetaBuffer start pos + 8 bytes modMetaBuffer end pos + 8 bytes all file data start pos
     // + modMetaBuffer + (boot file data + all file data)
-    const fileLength = magicNumberPadded.paddedDataLength + 8 + 8 + 8 + modMetaBufferPadded.paddedDataLength + bootJsonFile.paddedDataLength + fileBlockList.reduce((acc, block) => acc + block.paddedDataLength, 0);
+    const fileLength = magicNumberPadded.paddedDataLength + 8 + 8 + 8
+        + modMetaBufferPadded.paddedDataLength + bootJsonFile.paddedDataLength
+        + fileBlockList.reduce((acc, block) => acc + block.paddedDataLength, 0)
+        + fileTreeBufferPadded.paddedDataLength
+    ;
 
     // console.log('fileLength', fileLength);
 
@@ -240,6 +276,9 @@ export async function covertFromZipMod(
         offset += fileBlock.paddedDataLength;
         // console.log('offset', offset);
     }
+    modPackBuffer.set(fileTreeBufferPadded.paddedData, offset);
+    offset += fileTreeBufferPadded.paddedDataLength;
+
     if (!cryptoInfo) {
         return {
             modMeta: modMeta,
@@ -310,6 +349,7 @@ export class ModPackFileReader {
     xchacha20Key?: Uint8Array;
     xchacha20Nonce?: Uint8Array;
     private modPackBuffer!: Uint8Array;
+    fileTree?: Record<string, any>;
 
     public async load(modPackBuffer: Uint8Array, password?: string): Promise<ModMeta> {
         await ready;
@@ -476,5 +516,25 @@ export class ModPackFileReader {
     public async getBootJson(): Promise<Uint8Array | undefined> {
         await ready;
         return this.getFileByMeta(this.modMeta.bootJsonFile, 'boot.json');
+    }
+
+    public async getFileTree(): Promise<Record<string, any> | undefined> {
+        await ready;
+        if (this.fileTree) {
+            return this.fileTree;
+        }
+        const fileTreeBuffer = await this.getFileByMeta(this.modMeta.fileTreeBlock, 'fileTree');
+        if (!fileTreeBuffer) {
+            console.warn('[ModPackFileReader] File tree not found in mod meta');
+            return undefined;
+        }
+        try {
+            const fileTree = BSON.deserialize(fileTreeBuffer) as Record<string, any>;
+            this.fileTree = fileTree;
+            return fileTree;
+        } catch (error) {
+            console.error('[ModPackFileReader] Failed to deserialize file tree:', error);
+            throw error;
+        }
     }
 }

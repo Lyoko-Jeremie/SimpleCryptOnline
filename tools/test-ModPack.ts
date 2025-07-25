@@ -14,14 +14,24 @@ async function readFile(path: string): Promise<Uint8Array> {
     });
 }
 
+const filePathList = [
+    '1.txt',
+    '2.txt',
+    '3.bin',
+
+    '1/1.txt',
+    '1/2.txt',
+
+    '2/1.txt',
+    '2/2.txt',
+
+    '1/2/1.txt',
+    '1/2/2.txt',
+];
+
 async function testMakeFile() {
     const modName = 'testMod';
     const fileRoot = 'tools/test-file';
-    const filePathList = [
-        '1.txt',
-        '2.txt',
-        '3.bin',
-    ];
 
     const out = await covertFromZipMod(
         modName,
@@ -35,7 +45,7 @@ async function testMakeFile() {
             }
             return d;
         },
-        '123456789abcdefghijklmnopqrstuvwxyz123456789abcdefghijklmnopqrstuvwxyz123456789abcdefghijklmnopqrstuvwxyz123456789abcdefghijklmnopqrstuvwxyz123456789abcdefghijklmnopqrstuvwxyz123456789abcdefghijklmnopqrstuvwxyz',
+        // '123456789abcdefghijklmnopqrstuvwxyz123456789abcdefghijklmnopqrstuvwxyz123456789abcdefghijklmnopqrstuvwxyz123456789abcdefghijklmnopqrstuvwxyz123456789abcdefghijklmnopqrstuvwxyz123456789abcdefghijklmnopqrstuvwxyz',
     );
 
     console.log('modMeta');
@@ -67,8 +77,8 @@ async function testReadFile() {
     const reader = new ModPackFileReader();
     const filePath = join(
         'tools/test-file',
-        // 'testMod.modpack',
-        'testMod.modpack.crypt',
+        'testMod.modpack',
+        // 'testMod.modpack.crypt',
     );
     const data = await readFile(filePath);
     if (!data || data.length === 0) {
@@ -78,23 +88,21 @@ async function testReadFile() {
     // console.log('data', data.length);
     await reader.load(
         data,
-        '123456789abcdefghijklmnopqrstuvwxyz123456789abcdefghijklmnopqrstuvwxyz123456789abcdefghijklmnopqrstuvwxyz123456789abcdefghijklmnopqrstuvwxyz123456789abcdefghijklmnopqrstuvwxyz123456789abcdefghijklmnopqrstuvwxyz',
+        // '123456789abcdefghijklmnopqrstuvwxyz123456789abcdefghijklmnopqrstuvwxyz123456789abcdefghijklmnopqrstuvwxyz123456789abcdefghijklmnopqrstuvwxyz123456789abcdefghijklmnopqrstuvwxyz123456789abcdefghijklmnopqrstuvwxyz',
     );
     console.log('modMeta', reader.modMeta);
+
+    const fileTree = await reader.getFileTree();
+    console.log('fileTree', fileTree);
 
     // compare the file list
     const fileList = reader.getFileList();
     console.log('fileList', fileList);
-    const expectedFileList = [
-        '1.txt',
-        '2.txt',
-        '3.bin',
-    ];
-    if (fileList.length !== expectedFileList.length) {
-        console.error(`File list length mismatch: expected ${expectedFileList.length}, got ${fileList.length}`);
-        throw new Error(`File list length mismatch: expected ${expectedFileList.length}, got ${fileList.length}`);
+    if (fileList.length !== filePathList.length) {
+        console.error(`File list length mismatch: expected ${filePathList.length}, got ${fileList.length}`);
+        throw new Error(`File list length mismatch: expected ${filePathList.length}, got ${fileList.length}`);
     }
-    for (const fileName of expectedFileList) {
+    for (const fileName of filePathList) {
         if (!fileList.includes(fileName)) {
             console.error(`File ${fileName} not found in the mod pack.`);
             throw new Error(`File ${fileName} not found in the mod pack.`);
@@ -127,14 +135,14 @@ async function testReadFile() {
 }
 
 
-// ;(testMakeFile().catch(console.error));
-// ;(testReadFile().catch(console.error));
+;(testMakeFile().catch(console.error));
+;(testReadFile().catch(console.error));
 
-;(async () => {
-    await testMakeFile();
-    await testReadFile();
-    console.log('Test completed successfully.');
-})().catch(console.error);
+// ;(async () => {
+//     await testMakeFile();
+//     await testReadFile();
+//     console.log('Test completed successfully.');
+// })().catch(console.error);
 
 
 
