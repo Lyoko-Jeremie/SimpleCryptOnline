@@ -204,25 +204,36 @@ export async function covertFromZipMod(
     // Calculate the total file length
     // magicNumber (16 bytes) + 8 bytes modMetaBuffer start pos + 8 bytes all file data start pos
     // + modMetaBuffer + (boot file data + all file data)
-    const fileLength = magicNumberPadded.paddedDataLength + 8 + 8 + modMetaBufferPadded.paddedDataLength + fileBlockList.reduce((acc, block) => acc + block.paddedDataLength, 0);
+    const fileLength = magicNumberPadded.paddedDataLength + 8 + 8 + modMetaBufferPadded.paddedDataLength + bootJsonFile.paddedDataLength + fileBlockList.reduce((acc, block) => acc + block.paddedDataLength, 0);
 
+    // console.log('fileLength', fileLength);
 
     const modPackBuffer = new Uint8Array(fileLength);
+    // console.log('modPackBuffer.length', modPackBuffer.length);
+
     let offset = 0;
+    // console.log('offset', offset, magicNumberPadded.paddedData.length, magicNumberPadded.paddedDataLength);
     modPackBuffer.set(magicNumberPadded.paddedData, offset);
     offset += magicNumberPadded.paddedDataLength;
+    // console.log('offset', offset);
     const dataView = new DataView(modPackBuffer.buffer);
     dataView.setBigUint64(offset, BigInt(magicNumberPadded.paddedDataLength + 8 + 8), true); // modMetaBuffer start pos
     offset += 8;
+    // console.log('offset', offset);
     dataView.setBigUint64(offset, BigInt(magicNumberPadded.paddedDataLength + 8 + 8 + modMetaBufferPadded.paddedDataLength), true); // all file data start pos
     offset += 8;
+    // console.log('offset', offset, modMetaBufferPadded.paddedData.length, modMetaBufferPadded.paddedDataLength);
     modPackBuffer.set(modMetaBufferPadded.paddedData, offset);
     offset += modMetaBufferPadded.paddedDataLength;
+    // console.log('offset', offset, bootJsonFile.paddedData.length, bootJsonFile.paddedDataLength);
     modPackBuffer.set(bootJsonFile.paddedData, offset);
     offset += bootJsonFile.paddedDataLength;
+    // console.log('offset for', offset);
     for (const fileBlock of fileBlockList) {
+        // console.log('offset', offset, fileBlock.paddedData.length, fileBlock.paddedDataLength);
         modPackBuffer.set(fileBlock.paddedData, offset);
         offset += fileBlock.paddedDataLength;
+        // console.log('offset', offset);
     }
     if (!cryptoInfo) {
         return {
