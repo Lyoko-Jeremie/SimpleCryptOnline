@@ -1525,6 +1525,7 @@ __metadata:
     tsconfig-paths-webpack-plugin: ^4.1.0
     tsx: ^4.20.3
     typescript: ^5.1.6
+    uint8-to-base64: ^0.2.1
     webpack: ^5.88.2
     webpack-cli: ^5.1.4
     webpack-dev-server: ^4.15.1
@@ -7556,6 +7557,13 @@ __metadata:
     tsc: bin/tsc
     tsserver: bin/tsserver
   checksum: 803430c6da2ba73c25a21880d8d4f08a56d9d2444e6db2ea949ac4abceeece8e4a442b7b9b585db7d8a0b47ebda2060e45fe8ee8b8aca23e27ec1d4844987ee6
+  languageName: node
+  linkType: hard
+
+"uint8-to-base64@npm:^0.2.1":
+  version: 0.2.1
+  resolution: "uint8-to-base64@npm:0.2.1"
+  checksum: c394c82c505a19a5173672cc6ae796fbcf88b49a16b2ccdd065f0947d5a355344ef7002fad36df4252611d5862168441d81184904f90ed71d09db791b2f7c54e
   languageName: node
   linkType: hard
 
