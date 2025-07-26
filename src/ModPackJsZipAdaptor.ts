@@ -248,8 +248,8 @@ export class ModPackFileReaderJsZipAdaptor extends ModPackFileReader {
     }
 
     public async prepareForZipAdaptor() {
-        const files = this.files;
         this._isPrepared = true;
+        const files = this.files;
     }
 
     get files(): Record<string, ModPackJsZipObjectAdaptor> {
