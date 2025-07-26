@@ -1,7 +1,7 @@
 import {join, basename} from 'path';
 // import {promisify} from 'util';
 import fs from 'fs/promises';
-// import JsZip from 'jszip';
+import JsZip from 'jszip';
 import {
     covertFromZipMod,
     ModPackFileReader,
@@ -28,6 +28,73 @@ const filePathList = [
     '1/2/1.txt',
     '1/2/2.txt',
 ];
+
+async function testZipFile2ModPack(zipFilePath: string) {
+    const zipFileData = await fs.readFile(zipFilePath);
+    const zip = await JsZip.loadAsync(zipFileData);
+    const getFileFromZip = async (fileName: string): Promise<Uint8Array> => {
+        const file = zip.file(fileName);
+        if (!file) {
+            console.error(`File ${fileName} not found in the zip.`);
+            throw new Error(`File ${fileName} not found in the zip.`);
+        }
+        const data = await file.async('uint8array');
+        if (!data) {
+            console.error(`File ${fileName} is empty or does not exist in the zip.`);
+            throw new Error(`File ${fileName} is empty or does not exist in the zip.`);
+        }
+        return data;
+    }
+    const bootFile = await zip.file('boot.json')?.async('string');
+    if (!bootFile) {
+        console.error('boot.json not found in the zip.');
+        throw new Error('boot.json not found in the zip.');
+    }
+    const modName = JSON.parse(bootFile).name;
+    if (!modName) {
+        console.error('modName not found in boot.json.');
+        throw new Error('modName not found in boot.json.');
+    }
+    // get all file list from zip
+    const fileList = new Set(Object.keys(zip.files));
+    fileList.delete('boot.json'); // remove boot.json from file list
+    for (const fileName of fileList) {
+        const f = zip.file(fileName);
+        if (!f) {
+            fileList.delete(fileName);
+            continue;
+        }
+        if (f.dir) {
+            // if the file is a directory, remove it from the file list
+            fileList.delete(fileName);
+            continue;
+        }
+    }
+    if (fileList.size === 0) {
+        console.error('No files found in the zip.');
+        throw new Error('No files found in the zip.');
+    }
+    console.log(`Found ${fileList.size} files in the zip.`);
+    // console.log(await zip.file('img/'));
+    // console.log([...fileList].map(T => zip.file(T)));
+    const out = await covertFromZipMod(
+        modName,
+        [...fileList],
+        getFileFromZip,
+        // '123456789abcdefghijklmnopqrstuvwxyz123456789abcdefghijklmnopqrstuvwxyz123456789abcdefghijklmnopqrstuvwxyz123456789abcdefghijklmnopqrstuvwxyz123456789abcdefghijklmnopqrstuvwxyz123456789abcdefghijklmnopqrstuvwxyz',
+    );
+
+    console.log('modMeta');
+    console.log(out.ext);
+    console.log(out.modMeta);
+    await fs.writeFile(
+        `${'.'}/${modName}${out.ext}`,
+        out.modPackBuffer,
+        {
+            flag: 'w',
+        },
+    );
+}
 
 async function testMakeFile() {
     const modName = 'testMod';
@@ -145,12 +212,13 @@ async function testReadFile() {
 // ;(testMakeFile().catch(console.error));
 // ;(testReadFile().catch(console.error));
 
-;(async () => {
-    await testMakeFile();
-    await testReadFile();
-    console.log('Test completed successfully.');
-})().catch(console.error);
+// ;(async () => {
+//     await testMakeFile();
+//     await testReadFile();
+//     console.log('Test completed successfully.');
+// })().catch(console.error);
 
 
+;(testZipFile2ModPack('tools/GameOriginalImagePack.mod.zip').catch(console.error));
 
 

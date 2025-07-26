@@ -239,6 +239,7 @@ export async function covertFromZipMod(
 
     const fileBlockList: ReturnType<typeof paddingToBlockSize>[] = [];
     for (const filePath of filePathList) {
+        // console.log(`Reading file: `, filePath);
         const fileData = await fileReaderFunc(filePath);
         if (!fileData) {
             console.error(`File ${filePath} not found`);
