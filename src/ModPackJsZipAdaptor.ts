@@ -48,7 +48,24 @@ interface InputByType {
     // stream: NodeJS.ReadableStream;
 }
 
+// from JsZip
 type InputFileFormat = InputByType[keyof InputByType] | Promise<InputByType[keyof InputByType]>;
+
+// from JsZip
+interface JSZipSupport {
+    arraybuffer: boolean;
+    uint8array: boolean;
+    blob: boolean;
+    nodebuffer: boolean;
+}
+
+// from JsZip
+type Compression = 'STORE' | 'DEFLATE';
+
+// from JsZip
+interface JSZipObjectOptions {
+    compression: Compression;
+}
 
 export class ModPackJsZipObjectAdaptor {
     protected myPathInFileTree: string[] = [];
@@ -160,6 +177,10 @@ export class ModPackJsZipObjectAdaptor {
     protected _files?: Record<string, ModPackJsZipObjectAdaptor>;
 
     get files(): Record<string, ModPackJsZipObjectAdaptor> {
+        if (!this._isValid) {
+            console.error('[ModPackJsZipAdaptor] Invalid ModPackJsZipAdaptor instance.');
+            throw new Error('[ModPackJsZipAdaptor] Invalid ModPackJsZipAdaptor instance.');
+        }
         if (!this._files) {
             this._files = {};
             for (const filePath in this.treeLevelRef) {
@@ -189,8 +210,18 @@ export class ModPackJsZipObjectAdaptor {
         return this._isValid;
     }
 
-}
+    // JsZip JSZipObject.options
+    get options(): JSZipObjectOptions {
+        if (!this._isValid) {
+            console.error('[ModPackJsZipAdaptor] Invalid ModPackJsZipAdaptor instance.');
+            throw new Error('[ModPackJsZipAdaptor] Invalid ModPackJsZipAdaptor instance.');
+        }
+        return {
+            compression: 'STORE',
+        };
+    }
 
+}
 
 export class ModPackFileReaderJsZipAdaptor extends ModPackFileReader {
     protected _files?: Record<string, ModPackJsZipObjectAdaptor>;
@@ -314,5 +345,13 @@ export class ModPackFileReaderJsZipAdaptor extends ModPackFileReader {
         return this;
     }
 
+    get support(): JSZipSupport {
+        return {
+            arraybuffer: true,
+            uint8array: true,
+            blob: true,
+            nodebuffer: false, // Node.js Buffer is not supported in browser environment
+        };
+    }
 }
 
