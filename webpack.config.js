@@ -48,6 +48,11 @@ const config = {
       filename: 'modpack-viewer.html',
       chunks: ['modpack'],
     }),
+    new HtmlWebpackPlugin({
+      template: 'src/mod-converter.html',
+      filename: 'mod-converter.html',
+      chunks: ['modpack'],
+    }),
     new ForkTsCheckerWebpackPlugin({
       typescript: {
         configFile: 'src/tsconfig.json',

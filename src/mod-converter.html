@@ -1,0 +1,754 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ModLoader Mod 文件转换器</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+
+        .container {
+            background: white;
+            border-radius: 8px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+            padding: 30px;
+        }
+
+        h1 {
+            color: #333;
+            text-align: center;
+            margin-bottom: 30px;
+        }
+
+        .converter-section {
+            border: 2px solid #ddd;
+            border-radius: 8px;
+            padding: 25px;
+            margin: 20px 0;
+            background: #fafafa;
+        }
+
+        .converter-section h2 {
+            color: #495057;
+            margin-top: 0;
+            margin-bottom: 20px;
+            text-align: center;
+        }
+
+        .upload-area {
+            border: 2px dashed #ddd;
+            border-radius: 8px;
+            padding: 30px;
+            text-align: center;
+            margin: 15px 0;
+            background: white;
+            transition: all 0.3s ease;
+        }
+
+        .upload-area.dragover {
+            border-color: #007bff;
+            background: #e7f3ff;
+        }
+
+        input[type="file"] {
+            margin: 10px 0;
+            padding: 10px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            width: 300px;
+        }
+
+        input[type="password"] {
+            margin: 10px;
+            padding: 10px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            width: 300px;
+        }
+
+        button {
+            background: #007bff;
+            color: white;
+            border: none;
+            padding: 12px 24px;
+            border-radius: 4px;
+            cursor: pointer;
+            margin: 5px;
+            font-size: 14px;
+        }
+
+        button:hover {
+            background: #0056b3;
+        }
+
+        button:disabled {
+            background: #ccc;
+            cursor: not-allowed;
+        }
+
+        .convert-btn {
+            background: #28a745;
+            font-size: 16px;
+            padding: 15px 30px;
+        }
+
+        .convert-btn:hover {
+            background: #1e7e34;
+        }
+
+        .info-section {
+            margin: 20px 0;
+        }
+
+        .mod-info {
+            background: #f8f9fa;
+            border: 1px solid #dee2e6;
+            border-radius: 4px;
+            padding: 20px;
+            margin: 15px 0;
+        }
+
+        .mod-info h3 {
+            margin: 0 0 15px 0;
+            color: #495057;
+        }
+
+        .info-detail {
+            margin: 8px 0;
+            font-family: monospace;
+            background: white;
+            padding: 8px;
+            border-radius: 3px;
+            border-left: 4px solid #007bff;
+        }
+
+        .file-stats {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+            gap: 15px;
+            margin: 15px 0;
+        }
+
+        .stat-item {
+            background: white;
+            padding: 15px;
+            border-radius: 6px;
+            text-align: center;
+            border: 1px solid #dee2e6;
+        }
+
+        .stat-number {
+            font-size: 24px;
+            font-weight: bold;
+            color: #007bff;
+        }
+
+        .stat-label {
+            font-size: 12px;
+            color: #6c757d;
+            margin-top: 5px;
+        }
+
+        .error {
+            color: #dc3545;
+            background: #f8d7da;
+            border: 1px solid #f5c6cb;
+            border-radius: 4px;
+            padding: 15px;
+            margin: 15px 0;
+        }
+
+        .success {
+            color: #155724;
+            background: #d4edda;
+            border: 1px solid #c3e6cb;
+            border-radius: 4px;
+            padding: 15px;
+            margin: 15px 0;
+        }
+
+        .loading {
+            text-align: center;
+            padding: 20px;
+        }
+
+        .spinner {
+            display: inline-block;
+            width: 20px;
+            height: 20px;
+            border: 3px solid #f3f3f3;
+            border-top: 3px solid #007bff;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+        .hidden {
+            display: none;
+        }
+
+        .download-section {
+            background: #e7f3ff;
+            border: 1px solid #007bff;
+            border-radius: 6px;
+            padding: 20px;
+            margin: 20px 0;
+            text-align: center;
+        }
+
+        .download-btn {
+            background: #17a2b8;
+            font-size: 16px;
+            padding: 12px 24px;
+        }
+
+        .download-btn:hover {
+            background: #138496;
+        }
+
+        .tabs {
+            display: flex;
+            margin-bottom: 20px;
+            border-bottom: 2px solid #dee2e6;
+        }
+
+        .tab {
+            flex: 1;
+            padding: 15px;
+            text-align: center;
+            background: #e8e8e8;
+            border: none;
+            cursor: pointer;
+            font-size: 16px;
+            border-bottom: 3px solid transparent;
+        }
+
+        .tab.active {
+            background: white;
+            border-bottom-color: #007bff;
+            color: #007bff;
+        }
+
+        .tab-content {
+            display: none;
+        }
+
+        .tab-content.active {
+            display: block;
+        }
+
+        .progress-bar {
+            width: 100%;
+            height: 20px;
+            background-color: #f0f0f0;
+            border-radius: 10px;
+            overflow: hidden;
+            margin: 10px 0;
+        }
+
+        .progress-fill {
+            height: 100%;
+            background-color: #007bff;
+            width: 0%;
+            transition: width 0.3s ease;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>ModLoader Mod 文件转换器</h1>
+        <p style="text-align: center; color: #6c757d;">支持 ZIP Mod 文件转换为 ModPack 格式，以及 ModPack 文件转换为 ZIP 格式</p>
+
+        <div class="tabs">
+            <button class="tab active" onclick="switchTab('zip2modpack')">ZIP → ModPack</button>
+            <button class="tab" onclick="switchTab('modpack2zip')">ModPack → ZIP</button>
+        </div>
+
+        <!-- ZIP to ModPack Tab -->
+        <div id="zip2modpack" class="tab-content active">
+            <div class="converter-section">
+                <h2>ZIP Mod 转换为 ModPack</h2>
+
+                <div class="upload-area" id="zipUploadArea">
+                    <h3>上传 ZIP Mod 文件</h3>
+                    <p>请上传包含 boot.json 的 mod.zip 文件</p>
+                    <input type="file" id="zipFileInput" accept=".zip" />
+                    <br>
+                    <input type="password" id="zipEncryptPassword" placeholder="加密密码 (可选，留空则不加密)" />
+                    <br>
+                    <button class="convert-btn" onclick="convertZipToModPack()">转换为 ModPack</button>
+                </div>
+
+                <div id="zipLoadingSection" class="loading hidden">
+                    <div class="spinner"></div>
+                    <p>正在处理文件...</p>
+                    <div class="progress-bar">
+                        <div class="progress-fill" id="zipProgressFill"></div>
+                    </div>
+                </div>
+
+                <div id="zipErrorSection" class="error hidden"></div>
+                <div id="zipSuccessSection" class="success hidden"></div>
+
+                <div id="zipInfoSection" class="info-section hidden">
+                    <div class="mod-info">
+                        <h3>Mod 信息</h3>
+                        <div id="zipModDetails"></div>
+                        <div class="file-stats" id="zipFileStats"></div>
+                    </div>
+
+                    <div id="zipDownloadSection" class="download-section hidden">
+                        <h4>转换完成！</h4>
+                        <p>您的 ModPack 文件已准备好下载</p>
+                        <button class="download-btn" id="downloadModPackBtn">下载 ModPack 文件</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- ModPack to ZIP Tab -->
+        <div id="modpack2zip" class="tab-content">
+            <div class="converter-section">
+                <h2>ModPack 转换为 ZIP Mod</h2>
+
+                <div class="upload-area" id="modpackUploadArea">
+                    <h3>上传 ModPack 文件</h3>
+                    <p>支持 .modpack 和 .modpack.crypt 文件</p>
+                    <input type="file" id="modpackFileInput" accept=".modpack,.crypt" />
+                    <br>
+                    <input type="password" id="modpackDecryptPassword" placeholder="解密密码 (如果文件是加密的)" />
+                    <br>
+                    <button class="convert-btn" onclick="convertModPackToZip()">转换为 ZIP</button>
+                </div>
+
+                <div id="modpackLoadingSection" class="loading hidden">
+                    <div class="spinner"></div>
+                    <p>正在处理文件...</p>
+                    <div class="progress-bar">
+                        <div class="progress-fill" id="modpackProgressFill"></div>
+                    </div>
+                </div>
+
+                <div id="modpackErrorSection" class="error hidden"></div>
+                <div id="modpackSuccessSection" class="success hidden"></div>
+
+                <div id="modpackInfoSection" class="info-section hidden">
+                    <div class="mod-info">
+                        <h3>ModPack 信息</h3>
+                        <div id="modpackModDetails"></div>
+                        <div class="file-stats" id="modpackFileStats"></div>
+                    </div>
+
+                    <div id="modpackDownloadSection" class="download-section hidden">
+                        <h4>转换完成！</h4>
+                        <p>您的 ZIP Mod 文件已准备好下载</p>
+                        <button class="download-btn" id="downloadZipBtn">下载 ZIP 文件</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 在生产环境中，这些脚本会通过 webpack 构建 -->
+    <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
+    <script src="modpack.js"></script>
+
+    <script>
+        let zipConvertResult = null;
+        let modpackConvertResult = null;
+
+        // Tab 切换功能
+        window.switchTab = function(tabName) {
+            // 隐藏所有 tab content
+            document.querySelectorAll('.tab-content').forEach(content => {
+                content.classList.remove('active');
+            });
+            // 移除所有 tab 的 active 状态
+            document.querySelectorAll('.tab').forEach(tab => {
+                tab.classList.remove('active');
+            });
+
+            // 显示选中的 tab content
+            document.getElementById(tabName).classList.add('active');
+            // 设置对应 tab 为 active
+            event.target.classList.add('active');
+        };
+
+        // 拖拽上传功能
+        function setupDragAndDrop(uploadAreaId, fileInputId) {
+            const uploadArea = document.getElementById(uploadAreaId);
+            const fileInput = document.getElementById(fileInputId);
+
+            uploadArea.addEventListener('dragover', (e) => {
+                e.preventDefault();
+                uploadArea.classList.add('dragover');
+            });
+
+            uploadArea.addEventListener('dragleave', (e) => {
+                e.preventDefault();
+                uploadArea.classList.remove('dragover');
+            });
+
+            uploadArea.addEventListener('drop', (e) => {
+                e.preventDefault();
+                uploadArea.classList.remove('dragover');
+                const files = e.dataTransfer.files;
+                if (files.length > 0) {
+                    fileInput.files = files;
+                }
+            });
+        }
+
+        // 设置拖拽功能
+        setupDragAndDrop('zipUploadArea', 'zipFileInput');
+        setupDragAndDrop('modpackUploadArea', 'modpackFileInput');
+
+        // ZIP 转 ModPack
+        window.convertZipToModPack = async function() {
+            const file = document.getElementById('zipFileInput').files[0];
+            if (!file) {
+                showError('zipErrorSection', '请选择一个ZIP文件');
+                return;
+            }
+
+            const password = document.getElementById('zipEncryptPassword').value || undefined;
+
+            try {
+                showLoading('zipLoadingSection', true);
+                hideError('zipErrorSection');
+                hideSuccess('zipSuccessSection');
+                hideInfo('zipInfoSection');
+                updateProgress('zipProgressFill', 10);
+
+                // 读取ZIP文件
+                const zipFileData = await file.arrayBuffer();
+                const zip = new JSZip();
+                await zip.loadAsync(zipFileData);
+                updateProgress('zipProgressFill', 30);
+
+                // 验证boot.json
+                const bootFile = zip.file('boot.json');
+                if (!bootFile) {
+                    throw new Error('ZIP文件中未找到 boot.json 文件');
+                }
+                const bootJson = await bootFile.async('string');
+                const modMeta = JSON.parse(bootJson);
+                const modName = modMeta.name;
+                if (!modName) {
+                    throw new Error('boot.json 中未找到模组名称');
+                }
+                updateProgress('zipProgressFill', 50);
+
+                // 获取文件列表
+                const fileList = new Set(Object.keys(zip.files));
+                fileList.delete('boot.json');
+
+                // 移除目录项
+                for (const fileName of fileList) {
+                    const f = zip.file(fileName);
+                    if (!f || f.dir) {
+                        fileList.delete(fileName);
+                    }
+                }
+
+                if (fileList.size === 0) {
+                    throw new Error('ZIP文件中没有找到有效的文件');
+                }
+
+                updateProgress('zipProgressFill', 70);
+
+                // 创建文件读取函数
+                const getFileFromZip = async (fileName) => {
+                    const file = zip.file(fileName);
+                    if (!file) {
+                        throw new Error(`文件 ${fileName} 在ZIP中不存在`);
+                    }
+                    return await file.async('uint8array');
+                };
+
+                // 转换为 ModPack
+                const result = await ModPack.covertFromZipMod(
+                    modName,
+                    [...fileList],
+                    getFileFromZip,
+                    password
+                );
+
+                updateProgress('zipProgressFill', 100);
+
+                // 保存结果
+                zipConvertResult = {
+                    buffer: result.modPackBuffer,
+                    filename: `${modName}${result.ext}`,
+                    modMeta: result.modMeta,
+                    fileCount: fileList.size,
+                    originalSize: zipFileData.byteLength,
+                    newSize: result.modPackBuffer.length
+                };
+
+                // 显示信息
+                displayZipModInfo(zipConvertResult);
+                showSuccess('zipSuccessSection', `成功转换为 ModPack 格式！文件数量: ${fileList.size}`);
+                showInfo('zipInfoSection');
+                document.getElementById('zipDownloadSection').classList.remove('hidden');
+
+            } catch (error) {
+                console.error('转换失败:', error);
+                showError('zipErrorSection', `转换失败: ${error.message}`);
+            } finally {
+                showLoading('zipLoadingSection', false);
+            }
+        };
+
+        // ModPack 转 ZIP
+        window.convertModPackToZip = async function() {
+            const file = document.getElementById('modpackFileInput').files[0];
+            if (!file) {
+                showError('modpackErrorSection', '请选择一个ModPack文件');
+                return;
+            }
+
+            const password = document.getElementById('modpackDecryptPassword').value || undefined;
+
+            try {
+                showLoading('modpackLoadingSection', true);
+                hideError('modpackErrorSection');
+                hideSuccess('modpackSuccessSection');
+                hideInfo('modpackInfoSection');
+                updateProgress('modpackProgressFill', 10);
+
+                // 读取ModPack文件
+                const modPackData = await file.arrayBuffer();
+                const reader = new ModPack.ModPackFileReader();
+                await reader.load(new Uint8Array(modPackData), password);
+                updateProgress('modpackProgressFill', 30);
+
+                // 验证文件
+                const isValid = await reader.checkValid();
+                if (!isValid) {
+                    throw new Error('ModPack 文件验证失败，文件可能已损坏或密码错误');
+                }
+                updateProgress('modpackProgressFill', 50);
+
+                // 获取文件列表
+                const fileList = reader.getFileList();
+                const zip = new JSZip();
+
+                // 添加boot.json
+                const bootJson = await reader.getBootJson();
+                zip.file('boot.json', bootJson);
+
+                updateProgress('modpackProgressFill', 70);
+
+                // 添加所有文件
+                for (const fileName of fileList) {
+                    const fileData = await reader.readFile(fileName);
+                    if (!fileData) {
+                        throw new Error(`无法读取文件: ${fileName}`);
+                    }
+                    zip.file(fileName, fileData);
+                }
+
+                // 生成ZIP数据
+                const zipData = await zip.generateAsync({
+                    type: 'uint8array',
+                    compression: 'DEFLATE',
+                    compressionOptions: {
+                        level: 9
+                    }
+                });
+
+                updateProgress('modpackProgressFill', 100);
+
+                // 保存结果
+                modpackConvertResult = {
+                    buffer: zipData,
+                    filename: file.name.replace(/\.(modpack|crypt)$/, '') + '.mod.zip',
+                    modMeta: reader.modMetaInfo,
+                    fileCount: fileList.length,
+                    originalSize: modPackData.byteLength,
+                    newSize: zipData.length
+                };
+
+                // 显示信息
+                displayModPackInfo(modpackConvertResult);
+                showSuccess('modpackSuccessSection', `成功转换为 ZIP 格式！文件数量: ${fileList.length}`);
+                showInfo('modpackInfoSection');
+                document.getElementById('modpackDownloadSection').classList.remove('hidden');
+
+            } catch (error) {
+                console.error('转换失败:', error);
+                showError('modpackErrorSection', `转换失败: ${error.message}`);
+            } finally {
+                showLoading('modpackLoadingSection', false);
+            }
+        };
+
+        // 显示ZIP转换后的信息
+        function displayZipModInfo(result) {
+            const details = document.getElementById('zipModDetails');
+            const stats = document.getElementById('zipFileStats');
+
+            const compressionRatio = ((1 - result.newSize / result.originalSize) * 100).toFixed(1);
+            const isEncrypted = result.filename.includes('.crypt');
+
+            details.innerHTML = `
+                <div class="info-detail"><strong>模组名称:</strong> ${result.modMeta.name}</div>
+                <div class="info-detail"><strong>协议版本:</strong> ${result.modMeta.protocolVersion}</div>
+                <div class="info-detail"><strong>块大小:</strong> ${result.modMeta.blockSize} 字节</div>
+                <div class="info-detail"><strong>加密状态:</strong> ${isEncrypted ? '是 (已加密)' : '否'}</div>
+                <div class="info-detail"><strong>输出文件名:</strong> ${result.filename}</div>
+            `;
+
+            stats.innerHTML = `
+                <div class="stat-item">
+                    <div class="stat-number">${result.fileCount}</div>
+                    <div class="stat-label">文件数量</div>
+                </div>
+                <div class="stat-item">
+                    <div class="stat-number">${formatSize(result.originalSize)}</div>
+                    <div class="stat-label">原始大小</div>
+                </div>
+                <div class="stat-item">
+                    <div class="stat-number">${formatSize(result.newSize)}</div>
+                    <div class="stat-label">转换后大小</div>
+                </div>
+                <div class="stat-item">
+                    <div class="stat-number">${compressionRatio}%</div>
+                    <div class="stat-label">压缩率</div>
+                </div>
+            `;
+        }
+
+        // 显示ModPack信息
+        function displayModPackInfo(result) {
+            const details = document.getElementById('modpackModDetails');
+            const stats = document.getElementById('modpackFileStats');
+
+            const compressionRatio = ((result.newSize / result.originalSize - 1) * 100).toFixed(1);
+            const isEncrypted = result.modMeta.cryptoInfo ? '是 (加密)' : '否';
+
+            details.innerHTML = `
+                <div class="info-detail"><strong>模组名称:</strong> ${result.modMeta.name}</div>
+                <div class="info-detail"><strong>协议版本:</strong> ${result.modMeta.protocolVersion}</div>
+                <div class="info-detail"><strong>块大小:</strong> ${result.modMeta.blockSize} 字节</div>
+                <div class="info-detail"><strong>加密状态:</strong> ${isEncrypted}</div>
+                <div class="info-detail"><strong>输出文件名:</strong> ${result.filename}</div>
+                ${result.modMeta.cryptoInfo ? `
+                    <div class="info-detail"><strong>加密算法:</strong> XChaCha20</div>
+                ` : ''}
+            `;
+
+            stats.innerHTML = `
+                <div class="stat-item">
+                    <div class="stat-number">${result.fileCount}</div>
+                    <div class="stat-label">文件数量</div>
+                </div>
+                <div class="stat-item">
+                    <div class="stat-number">${formatSize(result.originalSize)}</div>
+                    <div class="stat-label">原始大小</div>
+                </div>
+                <div class="stat-item">
+                    <div class="stat-number">${formatSize(result.newSize)}</div>
+                    <div class="stat-label">转换后大小</div>
+                </div>
+                <div class="stat-item">
+                    <div class="stat-number">${compressionRatio > 0 ? '+' : ''}${compressionRatio}%</div>
+                    <div class="stat-label">大小变化</div>
+                </div>
+            `;
+        }
+
+        // 下载文件
+        document.getElementById('downloadModPackBtn').onclick = function() {
+            if (zipConvertResult) {
+                downloadFile(zipConvertResult.buffer, zipConvertResult.filename);
+                showSuccess('zipSuccessSection', '文件下载完成！');
+            }
+        };
+
+        document.getElementById('downloadZipBtn').onclick = function() {
+            if (modpackConvertResult) {
+                downloadFile(modpackConvertResult.buffer, modpackConvertResult.filename);
+                showSuccess('modpackSuccessSection', '文件下载完成！');
+            }
+        };
+
+        // 辅助函数
+        function downloadFile(buffer, filename) {
+            const blob = new Blob([buffer]);
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = filename;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+        }
+
+        function formatSize(bytes) {
+            if (bytes < 1024) return bytes + ' B';
+            if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
+            return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
+        }
+
+        function updateProgress(elementId, percent) {
+            const element = document.getElementById(elementId);
+            if (element) {
+                element.style.width = percent + '%';
+            }
+        }
+
+        function showLoading(elementId, show) {
+            document.getElementById(elementId).classList.toggle('hidden', !show);
+        }
+
+        function showError(elementId, message) {
+            const errorSection = document.getElementById(elementId);
+            errorSection.textContent = message;
+            errorSection.classList.remove('hidden');
+        }
+
+        function hideError(elementId) {
+            document.getElementById(elementId).classList.add('hidden');
+        }
+
+        function showSuccess(elementId, message) {
+            const successSection = document.getElementById(elementId);
+            successSection.textContent = message;
+            successSection.classList.remove('hidden');
+            setTimeout(() => {
+                successSection.classList.add('hidden');
+            }, 5000);
+        }
+
+        function hideSuccess(elementId) {
+            document.getElementById(elementId).classList.add('hidden');
+        }
+
+        function showInfo(elementId) {
+            document.getElementById(elementId).classList.remove('hidden');
+        }
+
+        function hideInfo(elementId) {
+            document.getElementById(elementId).classList.add('hidden');
+        }
+
+        // 检查必要的依赖是否加载
+        if (typeof ModPack === 'undefined' || typeof JSZip === 'undefined') {
+            console.warn('ModPack 或 JSZip 库未加载，某些功能可能无法正常工作');
+        }
+    </script>
+</body>
+</html>
