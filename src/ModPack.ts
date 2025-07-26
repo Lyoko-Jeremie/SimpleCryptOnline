@@ -368,13 +368,17 @@ export class ModPackFileReader {
     constructor() {
     }
 
-    password?: string;
-    modMeta!: ModMeta;
-    fileDataStartPos!: bigint;
-    xchacha20Key?: Uint8Array;
-    xchacha20Nonce?: Uint8Array;
+    get isInit(): boolean {
+        return !!this.modMeta && !!this.modPackBuffer && this.modPackBuffer.length > 0;
+    }
+
+    private password?: string;
+    private modMeta!: ModMeta;
+    private fileDataStartPos!: bigint;
+    private xchacha20Key?: Uint8Array;
+    private xchacha20Nonce?: Uint8Array;
     private modPackBuffer!: Uint8Array;
-    fileTree?: Record<string, any>;
+    private fileTree?: Record<string, any>;
 
     public async load(modPackBuffer: Uint8Array, password?: string): Promise<ModMeta> {
         await ready;
@@ -594,6 +598,10 @@ export class ModPackFileReader {
         }
     }
 
+    get fileTreeRef() {
+        return this.fileTree;
+    }
+
     public async checkValid(): Promise<boolean> {
         await ready;
         try {
@@ -620,6 +628,11 @@ export class ModPackFileReader {
                 console.log('[ModPackFileReader] password', this.password);
                 console.log('[ModPackFileReader] xchacha20Key', this.xchacha20Key);
                 console.log('[ModPackFileReader] xchacha20Nonce', this.xchacha20Nonce);
+                return false;
+            }
+            const boot = await this.getBootJson();
+            if (!boot) {
+                console.error('[ModPackFileReader] Boot JSON not loaded');
                 return false;
             }
             // check file tree compare with file list

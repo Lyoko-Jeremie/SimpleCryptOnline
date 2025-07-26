@@ -1,0 +1,318 @@
+import {
+    ModPackFileReader,
+} from './ModPack';
+import {every, find} from "lodash";
+
+function splitAndNormalizePath(path: string): string[] {
+    // Split the path by both forward and backward slashes
+    let parts = path.split(/[\/\\]/);
+    // Filter out any empty parts and normalize the path
+    parts = parts.filter(part => part.length > 0);
+    // remove .
+    parts = parts.filter(part => part !== '.');
+    // remove .. and when .. , remove the last element
+    while (parts.includes('..')) {
+        const index = parts.indexOf('..');
+        if (index > 0) {
+            parts.splice(index - 1, 2); // Remove the '..' and the previous part
+        } else {
+            parts.splice(index, 1); // If '..' is at the start, just remove it
+        }
+    }
+    return parts;
+}
+
+// from JsZip
+interface OutputByType {
+    base64: string;
+    string: string;
+    text: string;
+    binarystring: string;
+    array: number[];
+    uint8array: Uint8Array;
+    arraybuffer: ArrayBuffer;
+    blob: Blob;
+    // nodebuffer: Buffer;
+}
+
+// from JsZip
+interface InputByType {
+    base64: string;
+    string: string;
+    text: string;
+    binarystring: string;
+    array: number[];
+    uint8array: Uint8Array;
+    arraybuffer: ArrayBuffer;
+    blob: Blob;
+    // stream: NodeJS.ReadableStream;
+}
+
+type InputFileFormat = InputByType[keyof InputByType] | Promise<InputByType[keyof InputByType]>;
+
+export class ModPackJsZipObjectAdaptor {
+    protected myPathInFileTree: string[] = [];
+    protected treeLevelRef: Record<string, any>;
+    protected _isFile: boolean = false;
+    protected _isFolder: boolean = false;
+    protected _isValid: boolean = false;
+
+    constructor(
+        filePath: string,
+        protected readonly ref: ModPackFileReader,
+        protected readonly parent: ModPackJsZipObjectAdaptor | undefined,
+    ) {
+        this.myPathInFileTree = splitAndNormalizePath(filePath);
+        if (parent) {
+            this.myPathInFileTree = [...parent.myPathInFileTree, ...this.myPathInFileTree];
+        }
+        let treeRef = this.ref.fileTreeRef;
+        if (!treeRef) {
+            console.log('[ModPackJsZipAdaptor] File tree reference is not initialized');
+            throw new Error('[ModPackJsZipAdaptor] File tree reference is not initialized.');
+        }
+        for (const part of this.myPathInFileTree) {
+            if (!(part in treeRef)) {
+                console.log(`[ModPackJsZipAdaptor] Part "${part}" not found in file tree reference.`);
+                throw new Error(`[ModPackJsZipAdaptor] Part "${part}" not found in file tree reference.`);
+            }
+            treeRef = treeRef[part];
+            if (!treeRef) {
+                console.log(`[ModPackJsZipAdaptor] Part "${part}" is not a valid reference in file tree.`);
+                throw new Error(`[ModPackJsZipAdaptor] Part "${part}" is not a valid reference in file tree.`);
+            }
+        }
+        this.treeLevelRef = treeRef;
+        if (this.treeLevelRef['_f_']) {
+            this._isFile = true;
+            this._isFolder = false;
+        } else {
+            this._isFile = false;
+            this._isFolder = true;
+        }
+        this._isValid = true;
+    }
+
+    get dir() {
+        if (!this._isValid) {
+            console.error('[ModPackJsZipAdaptor] Invalid ModPackJsZipAdaptor instance.');
+            throw new Error('[ModPackJsZipAdaptor] Invalid ModPackJsZipAdaptor instance.');
+        }
+        return this._isFolder;
+    }
+
+    get name() {
+        if (!this._isValid) {
+            console.error('[ModPackJsZipAdaptor] Invalid ModPackJsZipAdaptor instance.');
+            throw new Error('[ModPackJsZipAdaptor] Invalid ModPackJsZipAdaptor instance.');
+        }
+        return this.myPathInFileTree[this.myPathInFileTree.length - 1];
+    }
+
+    get path() {
+        if (!this._isValid) {
+            console.error('[ModPackJsZipAdaptor] Invalid ModPackJsZipAdaptor instance.');
+            throw new Error('[ModPackJsZipAdaptor] Invalid ModPackJsZipAdaptor instance.');
+        }
+        return this.myPathInFileTree.join('/');
+    }
+
+    async async<T extends keyof OutputByType>(type: T): Promise<OutputByType[T]> {
+        if (!this._isValid) {
+            console.error('[ModPackJsZipAdaptor] Invalid ModPackJsZipAdaptor instance.');
+            throw new Error('[ModPackJsZipAdaptor] Invalid ModPackJsZipAdaptor instance.');
+        }
+        if (!this._isFile) {
+            console.error('[ModPackJsZipAdaptor] Cannot read content from a folder.');
+            throw new Error('[ModPackJsZipAdaptor] Cannot read content from a folder.');
+        }
+        // if not crypted, the data will be a none copy data
+        // if crypted, the data will be a copy data
+        const data = await this.ref.getFile(this.myPathInFileTree.join('/'));
+        if (!data) {
+            console.error(`[ModPackJsZipAdaptor] File "${this.myPathInFileTree.join('/')}" not found in the mod pack.`);
+            throw new Error(`[ModPackJsZipAdaptor] File "${this.myPathInFileTree.join('/')}" not found in the mod pack.`);
+        }
+        switch (type) {
+            case 'base64':
+                return btoa(String.fromCharCode(...data)) as OutputByType[T];
+            case 'string':
+            case 'text':
+                return new TextDecoder('utf-8').decode(data) as OutputByType[T];
+            case 'binarystring':
+                return Array.prototype.map.call(data, x => String.fromCharCode(x)).join('') as OutputByType[T];
+            case 'array':
+                return Array.from(data) as OutputByType[T];
+            case 'uint8array':
+                return data as OutputByType[T];
+            case 'arraybuffer':
+                return data.buffer.slice(data.byteOffset, data.byteOffset + data.byteLength) as OutputByType[T];
+            case 'blob':
+                return new Blob([data]) as OutputByType[T];
+            // case 'nodebuffer':
+            //     return data as OutputByType[T]; // Node.js Buffer
+            default:
+                console.error(`[ModPackJsZipAdaptor] Unsupported output type: ${type}`);
+                throw new Error(`[ModPackJsZipAdaptor] Unsupported output type: ${type}`);
+        }
+    }
+
+    protected _files?: Record<string, ModPackJsZipObjectAdaptor>;
+
+    get files(): Record<string, ModPackJsZipObjectAdaptor> {
+        if (!this._files) {
+            this._files = {};
+            for (const filePath in this.treeLevelRef) {
+                this._files[filePath] = new ModPackJsZipObjectAdaptor(filePath, this.ref, this);
+            }
+        }
+        return this._files;
+    }
+
+    get isFile(): boolean {
+        if (!this._isValid) {
+            console.error('[ModPackJsZipAdaptor] Invalid ModPackJsZipAdaptor instance.');
+            throw new Error('[ModPackJsZipAdaptor] Invalid ModPackJsZipAdaptor instance.');
+        }
+        return this._isFile;
+    }
+
+    get isFolder(): boolean {
+        if (!this._isValid) {
+            console.error('[ModPackJsZipAdaptor] Invalid ModPackJsZipAdaptor instance.');
+            throw new Error('[ModPackJsZipAdaptor] Invalid ModPackJsZipAdaptor instance.');
+        }
+        return this._isFolder;
+    }
+
+    get isValid(): boolean {
+        return this._isValid;
+    }
+
+}
+
+
+export class ModPackFileReaderJsZipAdaptor extends ModPackFileReader {
+    protected _files?: Record<string, ModPackJsZipObjectAdaptor>;
+
+    protected _isPrepared: boolean = false;
+    protected zipAdaptorPassword?: string;
+
+    prepareSetPassword(password: string | undefined) {
+        if (this.isInit) {
+            console.error('[ModPackFileReaderJsZipAdaptor] Cannot set password after initialization.');
+            throw new Error('[ModPackFileReaderJsZipAdaptor] Cannot set password after initialization.');
+        }
+        this.zipAdaptorPassword = password;
+    }
+
+    public async prepareForZipAdaptor() {
+        const fileTree = await this.getFileTree();
+        if (!fileTree) {
+            console.error('[ModPackFileReaderJsZipAdaptor] File tree cannot initialized.');
+            throw new Error('[ModPackFileReaderJsZipAdaptor] File tree cannot initialized.');
+        }
+        this._isPrepared = true;
+    }
+
+    get files(): Record<string, ModPackJsZipObjectAdaptor> {
+        if (!this._isPrepared) {
+            console.error('[ModPackFileReaderJsZipAdaptor] File reader is not prepared for zip adaptor.');
+            throw new Error('[ModPackFileReaderJsZipAdaptor] File reader is not prepared for zip adaptor.');
+        }
+        if (!this._files) {
+            this._files = {};
+            for (const filePath in this.fileTreeRef) {
+                this._files[filePath] = new ModPackJsZipObjectAdaptor(filePath, this, undefined);
+            }
+        }
+        return this._files;
+    }
+
+    folder(path: string): ModPackJsZipObjectAdaptor | undefined {
+        if (!this._isPrepared) {
+            console.error('[ModPackFileReaderJsZipAdaptor] File reader is not prepared for zip adaptor.');
+            throw new Error('[ModPackFileReaderJsZipAdaptor] File reader is not prepared for zip adaptor.');
+        }
+        const m = new ModPackJsZipObjectAdaptor(path, this, undefined);
+        if (m.isValid && m.isFolder) {
+            return m;
+        } else {
+            console.error(`[ModPackFileReaderJsZipAdaptor] Folder "${path}" not found or is not a folder.`);
+            return undefined;
+        }
+    }
+
+    forEach(callback: (relativePath: string, file: ModPackJsZipObjectAdaptor) => void): void {
+        if (!this._isPrepared) {
+            console.error('[ModPackFileReaderJsZipAdaptor] File reader is not prepared for zip adaptor.');
+            throw new Error('[ModPackFileReaderJsZipAdaptor] File reader is not prepared for zip adaptor.');
+        }
+        for (const filePath in this.files) {
+            const file = this.files[filePath];
+            if (file.isValid) {
+                callback(filePath, file);
+            } else {
+                console.error(`[ModPackFileReaderJsZipAdaptor] File "${filePath}" is not valid.`);
+            }
+        }
+    }
+
+    filter(predicate: (relativePath: string, file: ModPackJsZipObjectAdaptor) => boolean): ModPackJsZipObjectAdaptor[] {
+        if (!this._isPrepared) {
+            console.error('[ModPackFileReaderJsZipAdaptor] File reader is not prepared for zip adaptor.');
+            throw new Error('[ModPackFileReaderJsZipAdaptor] File reader is not prepared for zip adaptor.');
+        }
+        const result: ModPackJsZipObjectAdaptor[] = [];
+        for (const filePath in this.files) {
+            const file = this.files[filePath];
+            if (file.isValid && predicate(filePath, file)) {
+                result.push(file);
+            }
+        }
+        return result;
+    }
+
+    async loadAsync(data: InputFileFormat, options?: any): Promise<typeof this> {
+        let dataI = await data;
+        let readData;
+        if (typeof dataI === 'string') {
+            // check type
+            //     base64: string;
+            //     string: string;
+            //     text: string;
+            //     binarystring: string;
+
+            if (/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(dataI)) {
+                // base64
+                readData = Uint8Array.from(atob(dataI), c => c.charCodeAt(0));
+            } else {
+                try {
+                    // text / string
+                    readData = new TextEncoder().encode(dataI);
+                } catch (e) {
+                    // is binarystring
+                    readData = Uint8Array.from(dataI, char => char.charCodeAt(0));
+                }
+            }
+        } else if (dataI instanceof Uint8Array || dataI instanceof ArrayBuffer) {
+            // already in binary format
+            readData = new Uint8Array(dataI);
+        } else if (dataI instanceof Blob) {
+            // Blob, read as binary
+            readData = new Uint8Array(await dataI.arrayBuffer());
+        } else if (Array.isArray(dataI)) {
+            // array of numbers
+            readData = new Uint8Array(dataI);
+        } else {
+            console.error('[ModPackFileReaderJsZipAdaptor] Unsupported data type for loading.');
+            throw new Error('[ModPackFileReaderJsZipAdaptor] Unsupported data type for loading.');
+        }
+
+        await this.load(readData, this.zipAdaptorPassword);
+        await this.prepareForZipAdaptor();
+        return this;
+    }
+
+}
+
