@@ -21,7 +21,8 @@
     "jszip": "^3.10.1",
     "libsodium-wrappers-sumo": "^0.7.13",
     "lodash": "^4.17.21",
-    "moment": "^2.29.4"
+    "moment": "^2.29.4",
+    "xxhash-wasm": "^1.1.0"
   },
   "devDependencies": {
     "@types/jquery": "^3.5.19",

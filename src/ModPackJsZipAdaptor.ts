@@ -224,6 +224,10 @@ export class ModPackJsZipObjectAdaptor {
 }
 
 export class ModPackFileReaderJsZipAdaptor extends ModPackFileReader {
+    get is_JeremieModLoader_ModPack() {
+        return true; // This is a specific implementation for Jeremie ModLoader ModPack
+    }
+
     protected _files?: Record<string, ModPackJsZipObjectAdaptor>;
 
     protected _isPrepared: boolean = false;
@@ -243,6 +247,7 @@ export class ModPackFileReaderJsZipAdaptor extends ModPackFileReader {
             console.error('[ModPackFileReaderJsZipAdaptor] File tree cannot initialized.');
             throw new Error('[ModPackFileReaderJsZipAdaptor] File tree cannot initialized.');
         }
+        const files = this.files;
         this._isPrepared = true;
     }
 
@@ -253,26 +258,49 @@ export class ModPackFileReaderJsZipAdaptor extends ModPackFileReader {
         }
         if (!this._files) {
             this._files = {};
-            for (const filePath in this.fileTreeRef) {
+            for (const filePath of this.getFileList()) {
                 this._files[filePath] = new ModPackJsZipObjectAdaptor(filePath, this, undefined);
             }
         }
         return this._files;
     }
 
-    folder(path: string): ModPackJsZipObjectAdaptor | undefined {
+    file(path: string): ModPackJsZipObjectAdaptor | null;
+    file(path: RegExp): ModPackJsZipObjectAdaptor[] | null;
+    file(path: string | RegExp): ModPackJsZipObjectAdaptor | ModPackJsZipObjectAdaptor[] | null {
         if (!this._isPrepared) {
             console.error('[ModPackFileReaderJsZipAdaptor] File reader is not prepared for zip adaptor.');
             throw new Error('[ModPackFileReaderJsZipAdaptor] File reader is not prepared for zip adaptor.');
         }
-        const m = new ModPackJsZipObjectAdaptor(path, this, undefined);
-        if (m.isValid && m.isFolder) {
-            return m;
-        } else {
-            console.error(`[ModPackFileReaderJsZipAdaptor] Folder "${path}" not found or is not a folder.`);
-            return undefined;
+        if (typeof path === 'string') {
+            return this.files[path] || null;
         }
+        if (path instanceof RegExp) {
+            const matchedFiles: ModPackJsZipObjectAdaptor[] = [];
+            for (const filePath in this.files) {
+                if (path.test(filePath)) {
+                    matchedFiles.push(this.files[filePath]);
+                }
+            }
+            return matchedFiles.length > 0 ? matchedFiles : null;
+        }
+        console.error('[ModPackFileReaderJsZipAdaptor] Invalid path type. Expected string or RegExp.');
+        throw new Error('[ModPackFileReaderJsZipAdaptor] Invalid path type. Expected string or RegExp.');
     }
+
+    // folder(path: string): ModPackJsZipObjectAdaptor | undefined {
+    //     if (!this._isPrepared) {
+    //         console.error('[ModPackFileReaderJsZipAdaptor] File reader is not prepared for zip adaptor.');
+    //         throw new Error('[ModPackFileReaderJsZipAdaptor] File reader is not prepared for zip adaptor.');
+    //     }
+    //     const m = new ModPackJsZipObjectAdaptor(path, this, undefined);
+    //     if (m.isValid && m.isFolder) {
+    //         return m;
+    //     } else {
+    //         console.error(`[ModPackFileReaderJsZipAdaptor] Folder "${path}" not found or is not a folder.`);
+    //         return undefined;
+    //     }
+    // }
 
     forEach(callback: (relativePath: string, file: ModPackJsZipObjectAdaptor) => void): void {
         if (!this._isPrepared) {

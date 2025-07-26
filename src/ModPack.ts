@@ -1,5 +1,7 @@
 import {isEqual} from 'lodash';
 import {BSON} from 'bson';
+// @ts-ignore
+import xxhash from "xxhash-wasm";
 
 import {
     ready,
@@ -26,8 +28,9 @@ import {
 // block -1 : 文件头魔数 MagicNumber ：JeremieModLoader
 // 三个 8byte 长度数据(bigint) : ModMeta开始位置(byte)， ModMeta结束位置(byte)， 所有文件数据开始位置(byte)
 // block -1 : BSON(ModMeta)
-// block 0 ~ n-1 : 文件数据
-// block n : BSON(文件树 file tree) 文件树数据被作为一个文件对待。
+// block 0 ~ n-1 : 文件数据部分
+// block n : BSON(文件树 file tree) 文件树 被作为一个文件对待。
+// 8byte xxHash64 值在文件末尾， 用于校验文件完整性 ， hash 时计算除 xxHash64 值外前面的所有数据
 // ----------
 // 在加密模式下，block 0 ~ n 的所有文件数据部分都使用 crypto_stream_xchacha20_xor_ic 流加密模式加密
 // 文件头和 ModMeta 部分不加密， 每一个文件都对其到 BlockSize ， 而 BlockSize 是 crypto_stream_xchacha20_xor_ic 块大小
@@ -136,6 +139,31 @@ function createFileTreeFromFileList(fileList: string[]) {
     return fileTree;
 }
 
+// https://github.com/jungomi/xxhash-wasm/blob/5923f26411ed763044bed17a1fec33fee74e47a0/src/xxhash.js#L148
+function XxHashH64Bigint2String(h64: bigint): string {
+    return h64.toString(16).padStart(16, "0");
+}
+
+function XxHashH32Number2String(h32: bigint): string {
+    return h32.toString(16).padStart(8, "0");
+}
+
+function calcXxHash64(
+    data: Uint8Array,
+    xxhashApi: Awaited<ReturnType<typeof xxhash>>,
+): bigint {
+    const c = xxhashApi.create64();
+    // calc it block by block
+    const blockSize = BlockSize;
+    const blocks = Math.ceil(data.length / blockSize);
+    for (let i = 0; i < blocks; i++) {
+        const start = i * blockSize;
+        const end = Math.min(start + blockSize, data.length);
+        c.update(data.subarray(start, end));
+    }
+    return c.digest();
+}
+
 export async function covertFromZipMod(
     modName: string,
     filePathList: string[],
@@ -144,6 +172,7 @@ export async function covertFromZipMod(
     bootFilePath: string = 'boot.json',
 ) {
     await ready;
+    const xxhashApi = await xxhash();
 
     // filePathList duplicate check
     const filePathSet = new Set(filePathList);
@@ -268,6 +297,7 @@ export async function covertFromZipMod(
         + modMetaBufferPadded.paddedDataLength + bootJsonFile.paddedDataLength
         + fileBlockList.reduce((acc, block) => acc + block.paddedDataLength, 0)
         + fileTreeBufferPadded.paddedDataLength
+        + 8 // xxhash value (8 bytes) at the end of the file
     ;
 
     // console.log('fileLength', fileLength);
@@ -305,10 +335,16 @@ export async function covertFromZipMod(
     offset += fileTreeBufferPadded.paddedDataLength;
 
     if (!cryptoInfo) {
+        const xxHashPos = offset;
+        const hashValue = calcXxHash64(modPackBuffer.subarray(0, xxHashPos), xxhashApi);
+        dataView.setBigUint64(xxHashPos, BigInt(hashValue), true); // Store the xxHash value at the end of the mod pack buffer
+
         return {
             modMeta: modMeta,
             modPackBuffer: modPackBuffer,
             ext: cryptoInfo ? '.modpack.crypt' : '.modpack',
+            hash: hashValue,
+            hashString: XxHashH64Bigint2String(hashValue),
         };
     }
 
@@ -356,10 +392,16 @@ export async function covertFromZipMod(
         blockPosIndex++;
     }
 
+    const xxHashPos = startPos + blockPosIndex * BlockSize;
+    const hashValue = calcXxHash64(modPackBuffer.subarray(0, xxHashPos), xxhashApi);
+    dataView.setBigUint64(xxHashPos, BigInt(hashValue), true); // Store the xxHash value at the end of the mod pack buffer
+
     return {
         modMeta: modMeta,
         modPackBuffer: modPackBuffer,
         ext: cryptoInfo ? '.modpack.crypt' : '.modpack',
+        hash: hashValue,
+        hashString: XxHashH64Bigint2String(hashValue),
     };
 
 }
@@ -379,9 +421,43 @@ export class ModPackFileReader {
     private xchacha20Nonce?: Uint8Array;
     private modPackBuffer!: Uint8Array;
     private fileTree?: Record<string, any>;
+    private xxHashApi?: Awaited<ReturnType<typeof xxhash>>;
+    private xxHashValue?: bigint;
+
+    get modMetaInfo(): ModMeta {
+        if (!this.isInit) {
+            throw new Error('ModPackFileReader is not initialized. Please call load() first.');
+        }
+        return this.modMeta;
+    }
+
+    get hash(): bigint {
+        if (!this.isInit) {
+            throw new Error('ModPackFileReader is not initialized. Please call load() first.');
+        }
+        return this.xxHashValue!;
+    }
+
+    public async checkHash(modPackBuffer: Uint8Array) {
+        const xxhashApi = this.xxHashApi ?? await xxhash();
+        const dataView = new DataView(this.modPackBuffer.buffer);
+        const xxHashValue = dataView.getBigUint64(dataView.byteLength - 8, true);
+        const hashValue = calcXxHash64(this.modPackBuffer.subarray(0, this.modPackBuffer.length - 8), xxhashApi);
+        console.log('[ModPackFileReader] xxHashValue:', XxHashH64Bigint2String(xxHashValue));
+        console.log('[ModPackFileReader] hashValue:', XxHashH64Bigint2String(hashValue));
+        if (xxHashValue !== hashValue) {
+            console.error(`[ModPackFileReader] Invalid xxHash value: ${XxHashH64Bigint2String(xxHashValue)}, expected: ${XxHashH64Bigint2String(hashValue)}`);
+            return false;
+        }
+        this.xxHashValue = xxHashValue;
+        return true;
+    }
 
     public async load(modPackBuffer: Uint8Array, password?: string): Promise<ModMeta> {
         await ready;
+        const xxhashApi = await xxhash();
+
+        this.xxHashApi = xxhashApi;
         this.modPackBuffer = modPackBuffer;
         this.password = password;
 
@@ -392,6 +468,11 @@ export class ModPackFileReader {
         const magicNumber = this.modPackBuffer.subarray(0, MagicNumber.length);
         if (!magicNumber.every((value, index) => value === MagicNumber[index])) {
             throw new Error('Invalid magic number in mod pack buffer');
+        }
+
+        if (!await this.checkHash(this.modPackBuffer)) {
+            console.error('[ModPackFileReader] Mod pack hash check failed');
+            throw new Error('[ModPackFileReader] Mod pack hash check failed');
         }
 
         // const modMetaStartPos = magicNumberLength + 8 + 8 + 8; // magic

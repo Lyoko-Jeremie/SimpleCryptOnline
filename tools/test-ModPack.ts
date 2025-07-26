@@ -45,7 +45,7 @@ async function testMakeFile() {
             }
             return d;
         },
-        // '123456789abcdefghijklmnopqrstuvwxyz123456789abcdefghijklmnopqrstuvwxyz123456789abcdefghijklmnopqrstuvwxyz123456789abcdefghijklmnopqrstuvwxyz123456789abcdefghijklmnopqrstuvwxyz123456789abcdefghijklmnopqrstuvwxyz',
+        '123456789abcdefghijklmnopqrstuvwxyz123456789abcdefghijklmnopqrstuvwxyz123456789abcdefghijklmnopqrstuvwxyz123456789abcdefghijklmnopqrstuvwxyz123456789abcdefghijklmnopqrstuvwxyz123456789abcdefghijklmnopqrstuvwxyz',
     );
 
     console.log('modMeta');
@@ -77,8 +77,8 @@ async function testReadFile() {
     const reader = new ModPackFileReader();
     const filePath = join(
         'tools/test-file',
-        'testMod.modpack',
-        // 'testMod.modpack.crypt',
+        // 'testMod.modpack',
+        'testMod.modpack.crypt',
     );
     const data = await readFile(filePath);
     if (!data || data.length === 0) {
@@ -88,9 +88,9 @@ async function testReadFile() {
     // console.log('data', data.length);
     await reader.load(
         data,
-        // '123456789abcdefghijklmnopqrstuvwxyz123456789abcdefghijklmnopqrstuvwxyz123456789abcdefghijklmnopqrstuvwxyz123456789abcdefghijklmnopqrstuvwxyz123456789abcdefghijklmnopqrstuvwxyz123456789abcdefghijklmnopqrstuvwxyz',
+        '123456789abcdefghijklmnopqrstuvwxyz123456789abcdefghijklmnopqrstuvwxyz123456789abcdefghijklmnopqrstuvwxyz123456789abcdefghijklmnopqrstuvwxyz123456789abcdefghijklmnopqrstuvwxyz123456789abcdefghijklmnopqrstuvwxyz',
     );
-    console.log('modMeta', reader.modMeta);
+    console.log('modMeta', reader.modMetaInfo);
 
     const fileTree = await reader.getFileTree();
     console.log('fileTree', fileTree);
