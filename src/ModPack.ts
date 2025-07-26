@@ -184,7 +184,7 @@ export async function covertFromZipMod(
 
     // make file tree from filePathList
     const fileTree = createFileTreeFromFileList(filePathList);
-    console.log('fileTree', JSON.stringify(fileTree, null, 2));
+    // console.log('fileTree', JSON.stringify(fileTree, null, 2));
     const fileTreeBuffer = BSON.serialize(fileTree);
     const fileTreeBufferPadded = paddingToBlockSize(
         fileTreeBuffer,
