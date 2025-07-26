@@ -447,6 +447,7 @@ export class ModPackFileReader {
 
     public async checkHash(modPackBuffer: Uint8Array) {
         const xxhashApi = ModPackFileReader.xxhashApi ?? await xxhash();
+        ModPackFileReader.xxhashApi = xxhashApi;
         const dataView = new DataView(this.modPackBuffer.buffer);
         const xxHashValue = dataView.getBigUint64(dataView.byteLength - 8, true);
         const hashValue = calcXxHash64(this.modPackBuffer.subarray(0, this.modPackBuffer.length - 8), xxhashApi);
@@ -462,9 +463,9 @@ export class ModPackFileReader {
 
     public async load(modPackBuffer: Uint8Array, password?: string): Promise<ModMeta> {
         await ready;
-        const xxhashApi = await xxhash();
-
+        const xxhashApi = ModPackFileReader.xxhashApi ?? await xxhash();
         ModPackFileReader.xxhashApi = xxhashApi;
+
         this.modPackBuffer = modPackBuffer;
         this.password = password;
 
