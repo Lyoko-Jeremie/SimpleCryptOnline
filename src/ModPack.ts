@@ -140,15 +140,15 @@ function createFileTreeFromFileList(fileList: string[]) {
 }
 
 // https://github.com/jungomi/xxhash-wasm/blob/5923f26411ed763044bed17a1fec33fee74e47a0/src/xxhash.js#L148
-function XxHashH64Bigint2String(h64: bigint): string {
+export function XxHashH64Bigint2String(h64: bigint): string {
     return h64.toString(16).padStart(16, "0");
 }
 
-function XxHashH32Number2String(h32: bigint): string {
+export function XxHashH32Number2String(h32: bigint): string {
     return h32.toString(16).padStart(8, "0");
 }
 
-function calcXxHash64(
+export function calcXxHash64(
     data: Uint8Array,
     xxhashApi: Awaited<ReturnType<typeof xxhash>>,
 ): bigint {
@@ -436,6 +436,13 @@ export class ModPackFileReader {
             throw new Error('ModPackFileReader is not initialized. Please call load() first.');
         }
         return this.xxHashValue!;
+    }
+
+    get hashString(): string {
+        if (!this.isInit) {
+            throw new Error('ModPackFileReader is not initialized. Please call load() first.');
+        }
+        return XxHashH64Bigint2String(this.xxHashValue!);
     }
 
     public async checkHash(modPackBuffer: Uint8Array) {

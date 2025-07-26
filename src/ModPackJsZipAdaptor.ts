@@ -1,7 +1,9 @@
 import {
-    ModPackFileReader,
+    BlockSize,
+    calcXxHash64, MagicNumber,
+    ModPackFileReader, XxHashH64Bigint2String,
 } from './ModPack';
-import {every, find} from "lodash";
+import xxhash, {XXHashAPI} from "xxhash-wasm";
 
 function splitAndNormalizePath(path: string): string[] {
     // Split the path by both forward and backward slashes
@@ -380,6 +382,30 @@ export class ModPackFileReaderJsZipAdaptor extends ModPackFileReader {
             blob: true,
             nodebuffer: false, // Node.js Buffer is not supported in browser environment
         };
+    }
+
+    public static async checkByHash(modPackBuffer: Uint8Array, xxHashApi: XXHashAPI | undefined = undefined): Promise<boolean> {
+
+        const magicNumberLength = Math.ceil(MagicNumber.length / BlockSize) * BlockSize; // Ensure magic number is padded to block size
+        if (modPackBuffer.length < magicNumberLength + 8 + 8 + 8) {
+            return false; // Ensure buffer is large enough for magic number, xxHash, and size
+        }
+        const magicNumber = modPackBuffer.subarray(0, MagicNumber.length);
+        if (!magicNumber.every((value, index) => value === MagicNumber[index])) {
+            return false;
+        }
+
+        const xxhashApi = xxHashApi ?? await xxhash();
+        const dataView = new DataView(modPackBuffer.buffer);
+        const xxHashValue = dataView.getBigUint64(dataView.byteLength - 8, true);
+        const hashValue = calcXxHash64(modPackBuffer.subarray(0, modPackBuffer.length - 8), xxhashApi);
+        console.log('[ModPackFileReader] xxHashValue:', XxHashH64Bigint2String(xxHashValue));
+        console.log('[ModPackFileReader] hashValue:', XxHashH64Bigint2String(hashValue));
+        if (xxHashValue !== hashValue) {
+            console.error(`[ModPackFileReader] Invalid xxHash value: ${XxHashH64Bigint2String(xxHashValue)}, expected: ${XxHashH64Bigint2String(hashValue)}`);
+            return false;
+        }
+        return true;
     }
 }
 
