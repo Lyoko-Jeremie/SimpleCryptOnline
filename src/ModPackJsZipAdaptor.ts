@@ -224,6 +224,7 @@ export class ModPackJsZipObjectAdaptor {
         };
     }
 
+    // internalStream()
 }
 
 export class ModPackFileReaderJsZipAdaptor extends ModPackFileReader {
