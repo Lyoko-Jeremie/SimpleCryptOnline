@@ -33,6 +33,11 @@ import {
 // 文件头和 ModMeta 部分不加密， 每一个文件都对其到 BlockSize ， 而 BlockSize 是 crypto_stream_xchacha20_xor_ic 块大小
 // 利用 crypto_stream_xchacha20_xor_ic 可以按块计算和解密的特性，实现随机文件访问和读取
 // 加密时可以原位加密，解密时只发生一次数据拷贝
+// ----------
+// 可扩展性：
+// 因为 ModMeta 本质上是一个二进制 json ， 可以在 ModMeta 中添加新的字段来附加较短的新数据。
+// 对于较大的新的定义，可以如同 FileTree 一样在文件树中添加新的文件，并在 ModMeta 中添加对应的字段存储指向到这个文件元数据即可。
+// ----------
 
 
 export interface FileMeta {
