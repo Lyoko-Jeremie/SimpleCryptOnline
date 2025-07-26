@@ -3,6 +3,7 @@ import {
     calcXxHash64, MagicNumber,
     ModPackFileReader, XxHashH64Bigint2String,
 } from './ModPack';
+// @ts-ignore
 import xxhash, {XXHashAPI} from "xxhash-wasm";
 
 function splitAndNormalizePath(path: string): string[] {
@@ -244,11 +245,6 @@ export class ModPackFileReaderJsZipAdaptor extends ModPackFileReader {
     }
 
     public async prepareForZipAdaptor() {
-        const fileTree = await this.getFileTree();
-        if (!fileTree) {
-            console.error('[ModPackFileReaderJsZipAdaptor] File tree cannot initialized.');
-            throw new Error('[ModPackFileReaderJsZipAdaptor] File tree cannot initialized.');
-        }
         const files = this.files;
         this._isPrepared = true;
     }
@@ -334,7 +330,41 @@ export class ModPackFileReaderJsZipAdaptor extends ModPackFileReader {
         return result;
     }
 
-    async loadAsync(data: InputFileFormat, options?: any): Promise<typeof this> {
+    get support(): JSZipSupport {
+        return {
+            arraybuffer: true,
+            uint8array: true,
+            blob: true,
+            nodebuffer: false, // Node.js Buffer is not supported in browser environment
+        };
+    }
+
+    public static async checkByHash(modPackBuffer: Uint8Array) {
+
+        const magicNumberLength = Math.ceil(MagicNumber.length / BlockSize) * BlockSize; // Ensure magic number is padded to block size
+        if (modPackBuffer.length < magicNumberLength + 8 + 8 + 8) {
+            return false; // Ensure buffer is large enough for magic number, xxHash, and size
+        }
+        const magicNumber = modPackBuffer.subarray(0, MagicNumber.length);
+        if (!magicNumber.every((value, index) => value === MagicNumber[index])) {
+            return false;
+        }
+
+        const xxhashApi = ModPackFileReader.xxhashApi ?? await xxhash();
+        ModPackFileReader.xxhashApi = xxhashApi;
+        const dataView = new DataView(modPackBuffer.buffer);
+        const xxHashValue = dataView.getBigUint64(dataView.byteLength - 8, true);
+        const hashValue = calcXxHash64(modPackBuffer.subarray(0, modPackBuffer.length - 8), xxhashApi);
+        console.log('[ModPackFileReader] xxHashValue:', XxHashH64Bigint2String(xxHashValue));
+        console.log('[ModPackFileReader] hashValue:', XxHashH64Bigint2String(hashValue));
+        if (xxHashValue !== hashValue) {
+            console.error(`[ModPackFileReader] Invalid xxHash value: ${XxHashH64Bigint2String(xxHashValue)}, expected: ${XxHashH64Bigint2String(hashValue)}`);
+            return false;
+        }
+        return true;
+    }
+
+    public static async loadAsync(data: InputFileFormat, options?: any): Promise<ModPackFileReaderJsZipAdaptor | undefined> {
         let dataI = await data;
         let readData;
         if (typeof dataI === 'string') {
@@ -370,42 +400,15 @@ export class ModPackFileReaderJsZipAdaptor extends ModPackFileReader {
             throw new Error('[ModPackFileReaderJsZipAdaptor] Unsupported data type for loading.');
         }
 
-        await this.load(readData, this.zipAdaptorPassword);
-        await this.prepareForZipAdaptor();
-        return this;
-    }
-
-    get support(): JSZipSupport {
-        return {
-            arraybuffer: true,
-            uint8array: true,
-            blob: true,
-            nodebuffer: false, // Node.js Buffer is not supported in browser environment
-        };
-    }
-
-    public static async checkByHash(modPackBuffer: Uint8Array, xxHashApi: XXHashAPI | undefined = undefined): Promise<boolean> {
-
-        const magicNumberLength = Math.ceil(MagicNumber.length / BlockSize) * BlockSize; // Ensure magic number is padded to block size
-        if (modPackBuffer.length < magicNumberLength + 8 + 8 + 8) {
-            return false; // Ensure buffer is large enough for magic number, xxHash, and size
-        }
-        const magicNumber = modPackBuffer.subarray(0, MagicNumber.length);
-        if (!magicNumber.every((value, index) => value === MagicNumber[index])) {
-            return false;
+        if (!await ModPackFileReaderJsZipAdaptor.checkByHash(readData)) {
+            return undefined;
         }
 
-        const xxhashApi = xxHashApi ?? await xxhash();
-        const dataView = new DataView(modPackBuffer.buffer);
-        const xxHashValue = dataView.getBigUint64(dataView.byteLength - 8, true);
-        const hashValue = calcXxHash64(modPackBuffer.subarray(0, modPackBuffer.length - 8), xxhashApi);
-        console.log('[ModPackFileReader] xxHashValue:', XxHashH64Bigint2String(xxHashValue));
-        console.log('[ModPackFileReader] hashValue:', XxHashH64Bigint2String(hashValue));
-        if (xxHashValue !== hashValue) {
-            console.error(`[ModPackFileReader] Invalid xxHash value: ${XxHashH64Bigint2String(xxHashValue)}, expected: ${XxHashH64Bigint2String(hashValue)}`);
-            return false;
-        }
-        return true;
+        const instance = new ModPackFileReaderJsZipAdaptor();
+
+        await instance.load(readData, instance.zipAdaptorPassword);
+        await instance.prepareForZipAdaptor();
+        return instance;
     }
 }
 

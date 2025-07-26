@@ -421,7 +421,7 @@ export class ModPackFileReader {
     private xchacha20Nonce?: Uint8Array;
     private modPackBuffer!: Uint8Array;
     private fileTree?: Record<string, any>;
-    private xxHashApi?: Awaited<ReturnType<typeof xxhash>>;
+    static xxhashApi?: Awaited<ReturnType<typeof xxhash>>;
     private xxHashValue?: bigint;
 
     get modMetaInfo(): ModMeta {
@@ -446,7 +446,7 @@ export class ModPackFileReader {
     }
 
     public async checkHash(modPackBuffer: Uint8Array) {
-        const xxhashApi = this.xxHashApi ?? await xxhash();
+        const xxhashApi = ModPackFileReader.xxhashApi ?? await xxhash();
         const dataView = new DataView(this.modPackBuffer.buffer);
         const xxHashValue = dataView.getBigUint64(dataView.byteLength - 8, true);
         const hashValue = calcXxHash64(this.modPackBuffer.subarray(0, this.modPackBuffer.length - 8), xxhashApi);
@@ -464,7 +464,7 @@ export class ModPackFileReader {
         await ready;
         const xxhashApi = await xxhash();
 
-        this.xxHashApi = xxhashApi;
+        ModPackFileReader.xxhashApi = xxhashApi;
         this.modPackBuffer = modPackBuffer;
         this.password = password;
 
