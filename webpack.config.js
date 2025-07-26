@@ -17,10 +17,18 @@ const TsconfigPathsPlugin = require('tsconfig-paths-webpack-plugin');
 const webpack = require('webpack');
 
 const config = {
-  entry: './src/index.ts',
+  entry: {
+    main: './src/index.ts',
+    modpack: './src/ModPack.ts',
+  },
   output: {
     path: path.resolve(__dirname, 'dist'),
-    filename: 'SimpleCryptOnline.js',
+    filename: '[name].js',
+    library: {
+      name: 'ModPack',
+      type: 'umd',
+    },
+    globalObject: 'this',
   },
   devtool: 'inline-source-map',
   target: 'web',
@@ -32,6 +40,13 @@ const config = {
   plugins: [
     new HtmlWebpackPlugin({
       template: 'src/1.html',
+      filename: 'index.html',
+      chunks: ['main'],
+    }),
+    new HtmlWebpackPlugin({
+      template: 'src/modpack-viewer.html',
+      filename: 'modpack-viewer.html',
+      chunks: ['modpack'],
     }),
     new ForkTsCheckerWebpackPlugin({
       typescript: {

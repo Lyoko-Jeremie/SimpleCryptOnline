@@ -1,0 +1,437 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ModPack 文件查看器</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+
+        .container {
+            background: white;
+            border-radius: 8px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+            padding: 30px;
+        }
+
+        h1 {
+            color: #333;
+            text-align: center;
+            margin-bottom: 30px;
+        }
+
+        .upload-section {
+            border: 2px dashed #ddd;
+            border-radius: 8px;
+            padding: 30px;
+            text-align: center;
+            margin-bottom: 30px;
+            background: #fafafa;
+        }
+
+        .upload-section.dragover {
+            border-color: #007bff;
+            background: #e7f3ff;
+        }
+
+        input[type="file"] {
+            margin: 10px 0;
+            padding: 10px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            width: 300px;
+        }
+
+        input[type="password"] {
+            margin: 10px;
+            padding: 10px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            width: 300px;
+        }
+
+        button {
+            background: #007bff;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 4px;
+            cursor: pointer;
+            margin: 5px;
+        }
+
+        button:hover {
+            background: #0056b3;
+        }
+
+        button:disabled {
+            background: #ccc;
+            cursor: not-allowed;
+        }
+
+        .info-section {
+            margin: 20px 0;
+        }
+
+        .meta-info {
+            background: #f8f9fa;
+            border: 1px solid #dee2e6;
+            border-radius: 4px;
+            padding: 15px;
+            margin: 10px 0;
+        }
+
+        .meta-info h3 {
+            margin: 0 0 10px 0;
+            color: #495057;
+        }
+
+        .meta-detail {
+            margin: 5px 0;
+            font-family: monospace;
+            background: white;
+            padding: 5px;
+            border-radius: 3px;
+        }
+
+        .file-list {
+            margin: 20px 0;
+        }
+
+        .file-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 10px;
+            border: 1px solid #dee2e6;
+            border-radius: 4px;
+            margin: 5px 0;
+            background: white;
+        }
+
+        .file-item:hover {
+            background: #f8f9fa;
+        }
+
+        .file-info {
+            flex: 1;
+            font-family: monospace;
+        }
+
+        .file-size {
+            color: #6c757d;
+            margin-left: 10px;
+        }
+
+        .download-btn {
+            background: #28a745;
+            font-size: 12px;
+            padding: 5px 10px;
+        }
+
+        .download-btn:hover {
+            background: #1e7e34;
+        }
+
+        .error {
+            color: #dc3545;
+            background: #f8d7da;
+            border: 1px solid #f5c6cb;
+            border-radius: 4px;
+            padding: 10px;
+            margin: 10px 0;
+        }
+
+        .success {
+            color: #155724;
+            background: #d4edda;
+            border: 1px solid #c3e6cb;
+            border-radius: 4px;
+            padding: 10px;
+            margin: 10px 0;
+        }
+
+        .loading {
+            text-align: center;
+            padding: 20px;
+        }
+
+        .spinner {
+            display: inline-block;
+            width: 20px;
+            height: 20px;
+            border: 3px solid #f3f3f3;
+            border-top: 3px solid #007bff;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+        .hidden {
+            display: none;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>ModPack 文件查看器</h1>
+
+        <div class="upload-section" id="uploadSection">
+            <h3>上传 ModPack 文件</h3>
+            <p>支持 .modpack 和 .modpack.crypt 文件</p>
+            <input type="file" id="fileInput" accept=".modpack,.crypt" />
+            <br>
+            <input type="password" id="passwordInput" placeholder="密码 (如果文件是加密的)" />
+            <br>
+            <button id="parseButton" onclick="parseModPack()">解析文件</button>
+        </div>
+
+        <div id="loadingSection" class="loading hidden">
+            <div class="spinner"></div>
+            <p>正在解析文件...</p>
+        </div>
+
+        <div id="errorSection" class="error hidden"></div>
+        <div id="successSection" class="success hidden"></div>
+
+        <div id="infoSection" class="info-section hidden">
+            <div class="meta-info">
+                <h3>ModPack 元数据</h3>
+                <div id="metaDetails"></div>
+            </div>
+
+            <div class="file-list">
+                <h3>文件列表 (<span id="fileCount">0</span> 个文件)</h3>
+                <div id="fileListContainer"></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 在生产环境中，这些脚本会通过 webpack 构建 -->
+    <script src="modpack.js"></script>
+
+    <script>
+        let currentReader = null;
+        let currentModPackBuffer = null;
+
+        // 拖拽上传功能
+        const uploadSection = document.getElementById('uploadSection');
+        const fileInput = document.getElementById('fileInput');
+
+        uploadSection.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            uploadSection.classList.add('dragover');
+        });
+
+        uploadSection.addEventListener('dragleave', (e) => {
+            e.preventDefault();
+            uploadSection.classList.remove('dragover');
+        });
+
+        uploadSection.addEventListener('drop', (e) => {
+            e.preventDefault();
+            uploadSection.classList.remove('dragover');
+            const files = e.dataTransfer.files;
+            if (files.length > 0) {
+                fileInput.files = files;
+            }
+        });
+
+        // 解析 ModPack 文件
+        window.parseModPack = async function() {
+            const file = fileInput.files[0];
+            if (!file) {
+                showError('请选择一个文件');
+                return;
+            }
+
+            const password = document.getElementById('passwordInput').value;
+
+            try {
+                showLoading(true);
+                hideError();
+                hideSuccess();
+                hideInfo();
+
+                // 读取文件
+                const arrayBuffer = await file.arrayBuffer();
+                currentModPackBuffer = new Uint8Array(arrayBuffer);
+
+                // 创建 ModPackFileReader 实例
+                currentReader = new ModPack.ModPackFileReader();
+
+                // 加载文件
+                const modMeta = await currentReader.load(currentModPackBuffer, password || undefined);
+
+                // 验证文件
+                const isValid = await currentReader.checkValid();
+                if (!isValid) {
+                    throw new Error('ModPack 文件验证失败，是否是加密文件？');
+                }
+
+                // 显示信息
+                displayModMeta(modMeta, currentReader);
+                await displayFileList();
+
+                showSuccess('文件解析成功！');
+                showInfo();
+
+            } catch (error) {
+                console.error('解析失败:', error);
+                console.log(currentReader.modMeta)
+                showError(`解析失败: ${error.message}`);
+            } finally {
+                showLoading(false);
+            }
+        };
+
+        // 显示 ModMeta 信息
+        function displayModMeta(modMeta, currentReader) {
+            const metaDetails = document.getElementById('metaDetails');
+            const cryptoInfo = modMeta.cryptoInfo ? '是 (加密)' : '否';
+
+            metaDetails.innerHTML = `
+                <div class="meta-detail"><strong>模组名称:</strong> ${modMeta.name}</div>
+                <div class="meta-detail"><strong>协议版本:</strong> ${modMeta.protocolVersion}</div>
+                <div class="meta-detail"><strong>块大小:</strong> ${modMeta.blockSize} 字节</div>
+                <div class="meta-detail"><strong>加密状态:</strong> ${cryptoInfo}</div>
+                <div class="meta-detail"><strong>文件哈希:</strong> ${currentReader.hashString}</div>
+                <div class="meta-detail"><strong>文件大小:</strong> ${currentReader.modPackBufferSize}</div>
+                ${modMeta.cryptoInfo ? `
+                    <div class="meta-detail"><strong>加密算法:</strong> XChaCha20</div>
+                ` : ''}
+            `;
+        }
+
+        // 显示文件列表
+        async function displayFileList() {
+            const fileList = currentReader.getFileList();
+            const fileCount = document.getElementById('fileCount');
+            const fileListContainer = document.getElementById('fileListContainer');
+
+            fileCount.textContent = fileList.length;
+
+            // 获取文件元数据
+            const modMeta = currentReader.modMetaInfo;
+
+            fileListContainer.innerHTML = '';
+
+            // 添加 boot.json 文件
+            const bootJsonDiv = createFileItem('boot.json', modMeta.bootJsonFile.l, true);
+            fileListContainer.appendChild(bootJsonDiv);
+
+            // 添加其他文件
+            fileList.forEach(filePath => {
+                const fileMeta = modMeta.fileMeta[filePath];
+                const fileDiv = createFileItem(filePath, fileMeta.l, false);
+                fileListContainer.appendChild(fileDiv);
+            });
+        }
+
+        // 创建文件项
+        function createFileItem(filePath, fileSize, isBootJson) {
+            const fileDiv = document.createElement('div');
+            fileDiv.className = 'file-item';
+
+            const formatSize = (bytes) => {
+                if (bytes < 1024) return bytes + ' B';
+                if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
+                return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
+            };
+
+            fileDiv.innerHTML = `
+                <div class="file-info">
+                    ${filePath}
+                    <span class="file-size">(${formatSize(fileSize)})</span>
+                </div>
+                <button class="download-btn" onclick="downloadFile('${filePath}', ${isBootJson})">
+                    下载
+                </button>
+            `;
+
+            return fileDiv;
+        }
+
+        // 下载文件
+        window.downloadFile = async function(filePath, isBootJson) {
+            try {
+                let fileData;
+
+                if (isBootJson) {
+                    fileData = await currentReader.getBootJson();
+                } else {
+                    fileData = await currentReader.readFile(filePath);
+                }
+
+                if (!fileData) {
+                    throw new Error(`无法读取文件: ${filePath}`);
+                }
+
+                // 创建下载
+                const blob = new Blob([fileData]);
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = filePath.replace(/[/\\]/g, '_'); // 替换路径分隔符
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+                URL.revokeObjectURL(url);
+
+                showSuccess(`文件 "${filePath}" 下载完成`);
+
+            } catch (error) {
+                console.error('下载失败:', error);
+                showError(`下载失败: ${error.message}`);
+            }
+        };
+
+        // UI 辅助函数
+        function showLoading(show) {
+            document.getElementById('loadingSection').classList.toggle('hidden', !show);
+        }
+
+        function showError(message) {
+            const errorSection = document.getElementById('errorSection');
+            errorSection.textContent = message;
+            errorSection.classList.remove('hidden');
+        }
+
+        function hideError() {
+            document.getElementById('errorSection').classList.add('hidden');
+        }
+
+        function showSuccess(message) {
+            const successSection = document.getElementById('successSection');
+            successSection.textContent = message;
+            successSection.classList.remove('hidden');
+            // 3秒后自动隐藏成功消息
+            setTimeout(() => {
+                successSection.classList.add('hidden');
+            }, 3000);
+        }
+
+        function hideSuccess() {
+            document.getElementById('successSection').classList.add('hidden');
+        }
+
+        function showInfo() {
+            document.getElementById('infoSection').classList.remove('hidden');
+        }
+
+        function hideInfo() {
+            document.getElementById('infoSection').classList.add('hidden');
+        }
+    </script>
+</body>
+</html>
