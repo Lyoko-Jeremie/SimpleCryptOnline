@@ -364,7 +364,7 @@ export class ModPackFileReaderJsZipAdaptor extends ModPackFileReader {
         return true;
     }
 
-    public static async loadAsync(data: InputFileFormat, options?: any & {
+    public async loadAsync(data: InputFileFormat, options?: any & {
         password?: string,
         base64?: boolean,
     }): Promise<ModPackFileReaderJsZipAdaptor | undefined> {
@@ -410,12 +410,11 @@ export class ModPackFileReaderJsZipAdaptor extends ModPackFileReader {
             return undefined;
         }
 
-        const instance = new ModPackFileReaderJsZipAdaptor();
-        instance.prepareSetPassword(options?.password);
+        this.prepareSetPassword(options?.password);
 
-        await instance.load(readData, instance.zipAdaptorPassword);
-        await instance.prepareForZipAdaptor();
-        return instance;
+        await this.load(readData, this.zipAdaptorPassword);
+        await this.prepareForZipAdaptor();
+        return this;
     }
 }
 
