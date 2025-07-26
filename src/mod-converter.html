@@ -281,10 +281,11 @@
 
                 <div class="upload-area" id="zipUploadArea">
                     <h3>上传 ZIP Mod 文件</h3>
-                    <p>请上传包含 boot.json 的 mod.zip 文件</p>
+                    <p>请上传包含 boot.json 的 mod zip 文件</p>
                     <input type="file" id="zipFileInput" accept=".zip" />
                     <br>
                     <input type="password" id="zipEncryptPassword" placeholder="加密密码 (可选，留空则不加密)" />
+                    <p style="color: darkgray;font-size: small;">注意：此 ModPack 加密方案还在草案阶段，ModLoader (v2.60.x) 尚不支持此加密方案 </p>
                     <br>
                     <button class="convert-btn" onclick="convertZipToModPack()">转换为 ModPack</button>
                 </div>

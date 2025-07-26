@@ -39,7 +39,7 @@ const config = {
   },
   plugins: [
     new HtmlWebpackPlugin({
-      template: 'src/1.html',
+      template: 'src/index.html',
       filename: 'index.html',
       chunks: ['main'],
     }),
