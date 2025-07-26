@@ -96,6 +96,53 @@ async function testZipFile2ModPack(zipFilePath: string) {
     );
 }
 
+async function testModPack2ZipFile(modPackFilePath: string) {
+    const modPackData = await fs.readFile(modPackFilePath);
+    const reader = new ModPackFileReader();
+    await reader.load(
+        modPackData,
+        // '123456789abcdefghijklmnopqrstuvwxyz123456789abcdefghijklmnopqrstuvwxyz123456789abcdefghijklmnopqrstuvwxyz123456789abcdefghijklmnopqrstuvwxyz123456789abcdefghijklmnopqrstuvwxyz123456789abcdefghijklmnopqrstuvwxyz',
+    );
+    console.log('modMeta', reader.modMetaInfo);
+
+    const fileTree = await reader.getFileTree();
+    console.log('fileTree', fileTree);
+
+    const checkValid = await reader.checkValid();
+    console.log('checkValid', checkValid);
+    if (!checkValid) {
+        console.error('Mod pack is not valid.');
+        throw new Error('Mod pack is not valid.');
+    }
+
+    const fileList = reader.getFileList();
+
+    const zip = new JsZip();
+    zip.file('boot.json', JSON.stringify(reader.modMetaInfo, null, 2));
+    for (const fileName of fileList) {
+        const fileData = await reader.readFile(fileName);
+        if (!fileData) {
+            console.error(`File ${fileName} is empty or does not exist in the mod pack.`);
+            throw new Error(`File ${fileName} is empty or does not exist in the mod pack.`);
+        }
+        zip.file(fileName, fileData);
+    }
+    const zipData = await zip.generateAsync({
+        type: 'uint8array',
+        compression: 'DEFLATE',
+        compressionOptions: {
+            level: 9, // Maximum compression level
+        },
+    });
+    const zipFileName = basename(modPackFilePath, '.modpack') + '.mod.zip';
+    await fs.writeFile(zipFileName, zipData, {
+        flag: 'w',
+    });
+    console.log(`Mod pack converted to zip file: ${zipFileName}`);
+    return zipFileName;
+
+}
+
 async function testMakeFile() {
     const modName = 'testMod';
     const fileRoot = 'tools/test-file';
@@ -219,6 +266,8 @@ async function testReadFile() {
 // })().catch(console.error);
 
 
-;(testZipFile2ModPack('tools/GameOriginalImagePack.mod.zip').catch(console.error));
+// ;(testZipFile2ModPack('tools/GameOriginalImagePack.mod.zip').catch(console.error));
+// ;(testModPack2ZipFile('GameOriginalImagePack.modpack.crypt').catch(console.error));
+// ;(testModPack2ZipFile('GameOriginalImagePack.modpack').catch(console.error));
 
 
