@@ -254,13 +254,27 @@
             border-radius: 10px;
             overflow: hidden;
             margin: 10px 0;
+            position: relative;
         }
 
         .progress-fill {
             height: 100%;
-            background-color: #007bff;
-            width: 0%;
-            transition: width 0.3s ease;
+            background: linear-gradient(90deg, 
+                transparent 0%, 
+                #007bff 50%, 
+                transparent 100%);
+            width: 50%;
+            position: absolute;
+            animation: progress-slide 2s infinite linear;
+        }
+
+        @keyframes progress-slide {
+            0% {
+                transform: translateX(-100%);
+            }
+            100% {
+                transform: translateX(300%);
+            }
         }
     </style>
 </head>
@@ -429,13 +443,11 @@
                 hideError('zipErrorSection');
                 hideSuccess('zipSuccessSection');
                 hideInfo('zipInfoSection');
-                updateProgress('zipProgressFill', 10);
 
                 // 读取ZIP文件
                 const zipFileData = await file.arrayBuffer();
                 const zip = new JSZip();
                 await zip.loadAsync(zipFileData);
-                updateProgress('zipProgressFill', 30);
 
                 // 验证boot.json
                 const bootFile = zip.file('boot.json');
@@ -448,7 +460,6 @@
                 if (!modName) {
                     throw new Error('boot.json 中未找到模组名称');
                 }
-                updateProgress('zipProgressFill', 50);
 
                 // 获取文件列表
                 const fileList = new Set(Object.keys(zip.files));
@@ -466,8 +477,6 @@
                     throw new Error('ZIP文件中没有找到有效的文件');
                 }
 
-                updateProgress('zipProgressFill', 70);
-
                 // 创建文件读取函数
                 const getFileFromZip = async (fileName) => {
                     const file = zip.file(fileName);
@@ -484,8 +493,6 @@
                     getFileFromZip,
                     password
                 );
-
-                updateProgress('zipProgressFill', 100);
 
                 // 保存结果
                 zipConvertResult = {
@@ -526,20 +533,17 @@
                 hideError('modpackErrorSection');
                 hideSuccess('modpackSuccessSection');
                 hideInfo('modpackInfoSection');
-                updateProgress('modpackProgressFill', 10);
 
                 // 读取ModPack文件
                 const modPackData = await file.arrayBuffer();
                 const reader = new ModPack.ModPackFileReader();
                 await reader.load(new Uint8Array(modPackData), password);
-                updateProgress('modpackProgressFill', 30);
 
                 // 验证文件
                 const isValid = await reader.checkValid();
                 if (!isValid) {
                     throw new Error('ModPack 文件验证失败，文件可能已损坏或密码错误');
                 }
-                updateProgress('modpackProgressFill', 50);
 
                 // 获取文件列表
                 const fileList = reader.getFileList();
@@ -548,8 +552,6 @@
                 // 添加boot.json
                 const bootJson = await reader.getBootJson();
                 zip.file('boot.json', bootJson);
-
-                updateProgress('modpackProgressFill', 70);
 
                 // 添加所有文件
                 for (const fileName of fileList) {
@@ -568,8 +570,6 @@
                         level: 9
                     }
                 });
-
-                updateProgress('modpackProgressFill', 100);
 
                 // 保存结果
                 modpackConvertResult = {
@@ -702,13 +702,6 @@
             if (bytes < 1024) return bytes + ' B';
             if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
             return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
-        }
-
-        function updateProgress(elementId, percent) {
-            const element = document.getElementById(elementId);
-            if (element) {
-                element.style.width = percent + '%';
-            }
         }
 
         function showLoading(elementId, show) {
