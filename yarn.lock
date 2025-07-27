@@ -1507,7 +1507,7 @@ __metadata:
     "@webpack-cli/generators": ^3.0.7
     bootstrap: ^5.3.1
     bson: ^6.10.4
-    core-js: ^3.39.0
+    core-js: ^3.44.0
     css-loader: ^6.8.1
     fork-ts-checker-webpack-plugin: ^8.0.0
     html-webpack-plugin: ^5.5.3
@@ -2472,10 +2472,10 @@ __metadata:
   languageName: node
   linkType: hard
 
-"core-js@npm:^3.39.0":
-  version: 3.39.0
-  resolution: "core-js@npm:3.39.0"
-  checksum: 7a3670e9a2a89e0a049daa288d742d09f6e16d27a8945c5e2ef6fc45dc57e5c4bc5db589da05947486f54ae978d14cf27bd3fb1db0b9907000a611e8af37355b
+"core-js@npm:^3.44.0":
+  version: 3.44.0
+  resolution: "core-js@npm:3.44.0"
+  checksum: 1a9fca319aaeb8ae58764f9566a92d5fe7f609749dd1e5e0af4e1a0e4c6f0402d51b5ad379decb6ee722df0a65f0897a1ed1da397888e53437a52d3c105724a5
   languageName: node
   linkType: hard
 

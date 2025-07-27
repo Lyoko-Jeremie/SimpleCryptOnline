@@ -18,6 +18,7 @@ const webpack = require('webpack');
 
 const config = {
   entry: {
+    polyfill: './src/polyfill.ts',
     main: './src/index.ts',
     modpack: './src/ModPack.ts',
   },
@@ -41,17 +42,17 @@ const config = {
     new HtmlWebpackPlugin({
       template: 'src/index.html',
       filename: 'index.html',
-      chunks: ['main'],
+      chunks: ['polyfill', 'main'],
     }),
     new HtmlWebpackPlugin({
       template: 'src/modpack-viewer.html',
       filename: 'modpack-viewer.html',
-      chunks: ['modpack'],
+      chunks: ['polyfill', 'modpack'],
     }),
     new HtmlWebpackPlugin({
       template: 'src/mod-converter.html',
       filename: 'mod-converter.html',
-      chunks: ['modpack'],
+      chunks: ['polyfill', 'modpack'],
     }),
     new ForkTsCheckerWebpackPlugin({
       typescript: {
