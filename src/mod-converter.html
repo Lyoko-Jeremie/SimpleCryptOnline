@@ -64,7 +64,7 @@
             width: 300px;
         }
 
-        input[type="password"] {
+        input[type="text"] {
             margin: 10px;
             padding: 10px;
             border: 1px solid #ddd;
@@ -284,7 +284,7 @@
                     <p>请上传包含 boot.json 的 mod zip 文件</p>
                     <input type="file" id="zipFileInput" accept=".zip" />
                     <br>
-                    <input type="password" id="zipEncryptPassword" placeholder="加密密码 (可选，留空则不加密)" />
+                    <input type="text" id="zipEncryptPassword" placeholder="加密密码 (可选，留空则不加密)" />
                     <p style="color: darkgray;font-size: small;">注意：此 ModPack 加密方案还在草案阶段，ModLoader (v2.60.x) 尚不支持此加密方案 </p>
                     <br>
                     <button class="convert-btn" onclick="convertZipToModPack()">转换为 ModPack</button>
@@ -327,7 +327,7 @@
                     <p>支持 .modpack 和 .modpack.crypt 文件</p>
                     <input type="file" id="modpackFileInput" accept=".modpack,.crypt" />
                     <br>
-                    <input type="password" id="modpackDecryptPassword" placeholder="解密密码 (如果文件是加密的)" />
+                    <input type="text" id="modpackDecryptPassword" placeholder="解密密码 (如果文件是加密的)" />
                     <br>
                     <button class="convert-btn" onclick="convertModPackToZip()">转换为 ZIP</button>
                 </div>

@@ -48,7 +48,7 @@
             width: 300px;
         }
 
-        input[type="password"] {
+        input[type="text"] {
             margin: 10px;
             padding: 10px;
             border: 1px solid #ddd;
@@ -191,7 +191,7 @@
             <p>支持 .modpack 和 .modpack.crypt 文件</p>
             <input type="file" id="fileInput" accept=".modpack,.crypt" />
             <br>
-            <input type="password" id="passwordInput" placeholder="密码 (如果文件是加密的)" />
+            <input type="text" id="passwordInput" placeholder="密码 (如果文件是加密的)" />
             <br>
             <button id="parseButton" onclick="parseModPack()">解析文件</button>
         </div>
