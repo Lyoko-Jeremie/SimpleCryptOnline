@@ -175,10 +175,13 @@ export async function covertFromZipMod(
     filePathList: string[],
     fileReaderFunc: (filePath: string) => Promise<Uint8Array | undefined>,
     password: string | undefined = undefined,
+    progressCallback?: (progress: number) => any | Promise<any>,
     bootFilePath: string = 'boot.json',
 ) {
     await ready;
     const xxhashApi = await xxhash();
+
+    await progressCallback?.(0);
 
     // filePathList duplicate check
     const filePathSet = new Set(filePathList);
@@ -226,6 +229,10 @@ export async function covertFromZipMod(
         // );
     }
 
+    await progressCallback?.(1);
+    const progressPerFile = Math.floor((100 - 6) * (cryptoInfo ? 0.5 : 1) / (filePathList.length + 1));
+    // console.log('progressPerFile', progressPerFile);
+
     const bootFile = await fileReaderFunc(bootFilePath);
     if (!bootFile) {
         console.error(`Boot file ${bootFilePath} not found`);
@@ -236,6 +243,9 @@ export async function covertFromZipMod(
         BlockSize,
     );
     bootJsonFile['filePath'] = bootFilePath;
+
+    let fileCount = 0;
+    await progressCallback?.(1 + progressPerFile * ++fileCount);
 
     const fileBlockList: ReturnType<typeof paddingToBlockSize>[] = [];
     for (const filePath of filePathList) {
@@ -251,6 +261,7 @@ export async function covertFromZipMod(
         );
         fileBlock['filePath'] = filePath;
         fileBlockList.push(fileBlock);
+        await progressCallback?.(1 + progressPerFile * ++fileCount);
     }
 
     const modMeta: ModMeta = {
@@ -290,9 +301,13 @@ export async function covertFromZipMod(
     modMeta.fileTreeBlock.l = fileTreeBufferPadded.dataLength;
     bockIndex += fileTreeBufferPadded.blocks;
 
+    await progressCallback?.(1 + progressPerFile * fileCount + 1);
+
     const modMetaBuffer = BSON.serialize(modMeta);
     // console.log('modMetaBuffer length:', modMetaBuffer.length);
     // console.log(modMetaBuffer);
+
+    await progressCallback?.(1 + progressPerFile * fileCount + 2);
 
     const magicNumberPadded = paddingToBlockSize(MagicNumber, BlockSize, 0);
     const modMetaBufferPadded = paddingToBlockSize(modMetaBuffer, BlockSize, 0);
@@ -315,6 +330,10 @@ export async function covertFromZipMod(
     modPackBuffer.fill(0); // Fill with zeros initially
     // console.log('modPackBuffer.length', modPackBuffer.length);
 
+    await progressCallback?.(1 + progressPerFile * fileCount + 3);
+
+    await progressCallback?.(1 + progressPerFile * fileCount + 4);
+
     let offset = 0;
     // console.log('offset', offset, magicNumberPadded.paddedData.length, magicNumberPadded.paddedDataLength);
     modPackBuffer.set(magicNumberPadded.paddedData, offset);
@@ -332,6 +351,7 @@ export async function covertFromZipMod(
     modPackBuffer.set(bootJsonFile.paddedData, offset);
     offset += bootJsonFile.paddedDataLength;
     // console.log('offset for', offset);
+    await progressCallback?.(1 + progressPerFile * fileCount + 5);
     for (const fileBlock of fileBlockList) {
         // console.log('offset', offset, fileBlock.paddedData.length, fileBlock.paddedDataLength);
         modPackBuffer.set(fileBlock.paddedData, offset);
@@ -340,12 +360,15 @@ export async function covertFromZipMod(
     }
     modPackBuffer.set(fileTreeBufferPadded.paddedData, offset);
     offset += fileTreeBufferPadded.paddedDataLength;
+    await progressCallback?.(1 + progressPerFile * fileCount + 6);
 
     if (!cryptoInfo) {
+        await progressCallback?.(99);
         const xxHashPos = offset;
         const hashValue = calcXxHash64(modPackBuffer.subarray(0, xxHashPos), xxhashApi);
         dataView.setBigUint64(xxHashPos, BigInt(hashValue), true); // Store the xxHash value at the end of the mod pack buffer
 
+        await progressCallback?.(100);
         return {
             modMeta: modMeta,
             modPackBuffer: modPackBuffer,
@@ -354,6 +377,8 @@ export async function covertFromZipMod(
             hashString: XxHashH64Bigint2String(hashValue),
         };
     }
+
+    // console.log('start crypt modPackBuffer with xchacha20');
 
     // ==========================================================================================================
     // Encrypt the modPackBuffer with xchacha20 , only the file data part , block by block , inplace encryption
@@ -377,6 +402,7 @@ export async function covertFromZipMod(
     let blockPosIndex = 0;
     const blockIndexLast = bockIndex;
     const startPos = magicNumberPadded.paddedDataLength + BlockSize + modMetaBufferPadded.paddedDataLength;
+    const progressPerCryptoBlock = Math.floor((100 - 6) * 0.5 / (blockIndexLast + 1));
     for (let blockIndex = 0; blockIndex < blockIndexLast; blockIndex++) {
 
         const blockStartPos = startPos + blockPosIndex * BlockSize;
@@ -397,12 +423,16 @@ export async function covertFromZipMod(
         );
         modPackBuffer.set(encryptedBlock, blockStartPos);
         blockPosIndex++;
+
+        await progressCallback?.(1 + progressPerFile * fileCount + 6 + (blockIndex + 1) * progressPerCryptoBlock);
     }
 
+    await progressCallback?.(99);
     const xxHashPos = startPos + blockPosIndex * BlockSize;
     const hashValue = calcXxHash64(modPackBuffer.subarray(0, xxHashPos), xxhashApi);
     dataView.setBigUint64(xxHashPos, BigInt(hashValue), true); // Store the xxHash value at the end of the mod pack buffer
 
+    await progressCallback?.(100);
     return {
         modMeta: modMeta,
         modPackBuffer: modPackBuffer,

@@ -159,7 +159,11 @@ async function testMakeFile() {
             }
             return d;
         },
-        '123456789abcdefghijklmnopqrstuvwxyz123456789abcdefghijklmnopqrstuvwxyz123456789abcdefghijklmnopqrstuvwxyz123456789abcdefghijklmnopqrstuvwxyz123456789abcdefghijklmnopqrstuvwxyz123456789abcdefghijklmnopqrstuvwxyz',
+        // '123456789abcdefghijklmnopqrstuvwxyz123456789abcdefghijklmnopqrstuvwxyz123456789abcdefghijklmnopqrstuvwxyz123456789abcdefghijklmnopqrstuvwxyz123456789abcdefghijklmnopqrstuvwxyz123456789abcdefghijklmnopqrstuvwxyz',
+        '',
+        async (p) => {
+            console.log('progress:', p);
+        }
     );
 
     console.log('modMeta');
@@ -256,7 +260,7 @@ async function testReadFile() {
 }
 
 
-// ;(testMakeFile().catch(console.error));
+;(testMakeFile().catch(console.error));
 // ;(testReadFile().catch(console.error));
 
 // ;(async () => {
