@@ -460,6 +460,11 @@ export class ModPackFileReader {
     private fileTree?: Record<string, any>;
     static xxhashApi?: Awaited<ReturnType<typeof xxhash>>;
     private xxHashValue?: bigint;
+    protected _progressCallback?: (progress: number) => any | Promise<any>;
+
+    set progressCallback(callback: (progress: number) => any | Promise<any>) {
+        this._progressCallback = callback;
+    }
 
     get modPackBufferSize(): number {
         if (!this.isInit) {
@@ -495,8 +500,8 @@ export class ModPackFileReader {
         const dataView = new DataView(this.modPackBuffer.buffer);
         const xxHashValue = dataView.getBigUint64(dataView.byteLength - 8, true);
         const hashValue = calcXxHash64(this.modPackBuffer.subarray(0, this.modPackBuffer.length - 8), xxhashApi);
-        console.log('[ModPackFileReader] xxHashValue:', XxHashH64Bigint2String(xxHashValue));
-        console.log('[ModPackFileReader] hashValue:', XxHashH64Bigint2String(hashValue));
+        // console.log('[ModPackFileReader] xxHashValue:', XxHashH64Bigint2String(xxHashValue));
+        // console.log('[ModPackFileReader] hashValue:', XxHashH64Bigint2String(hashValue));
         if (xxHashValue !== hashValue) {
             console.error(`[ModPackFileReader] Invalid xxHash value: ${XxHashH64Bigint2String(xxHashValue)}, expected: ${XxHashH64Bigint2String(hashValue)}`);
             return false;
@@ -522,10 +527,14 @@ export class ModPackFileReader {
             throw new Error('Invalid magic number in mod pack buffer');
         }
 
+        await this._progressCallback?.(0);
+
         if (!await this.checkHash(this.modPackBuffer)) {
             console.error('[ModPackFileReader] Mod pack hash check failed');
             throw new Error('[ModPackFileReader] Mod pack hash check failed');
         }
+
+        await this._progressCallback?.(10);
 
         // const modMetaStartPos = magicNumberLength + 8 + 8 + 8; // magic
         const dataView = new DataView(this.modPackBuffer.buffer);
@@ -544,6 +553,7 @@ export class ModPackFileReader {
         const modMetaBuffer = this.modPackBuffer.subarray(Number(modMetaBufferStartPos), Number(modMetaBufferEndPos));
         // console.log('[ModPackFileReader] modMetaBuffer length:', modMetaBuffer.length);
         // console.log(modMetaBuffer);
+        await this._progressCallback?.(20);
         const modMeta = BSON.deserialize(modMetaBuffer) as ModMeta;
         // console.log('[ModPackFileReader] modMeta:', modMeta);
         // console.log('[ModPackFileReader] modMeta.magicNumber:', from_base64(modMeta.magicNumber));
@@ -553,6 +563,7 @@ export class ModPackFileReader {
         }
 
         this.modMeta = modMeta;
+        await this._progressCallback?.(30);
 
         // check ModMeta valid
         if (modMeta.protocolVersion !== ModMetaProtocolVersion) {
@@ -573,6 +584,7 @@ export class ModPackFileReader {
                 throw new Error(`[ModPackFileReader] Invalid file meta for ${filePath}: ${JSON.stringify(fileMeta)}`);
             }
         }
+        await this._progressCallback?.(60);
 
         // check fileMeta not overlap
         const fileMetaList = Object.values(modMeta.fileMeta);
@@ -585,6 +597,7 @@ export class ModPackFileReader {
                 throw new Error(`[ModPackFileReader] File meta overlap detected between ${JSON.stringify(current)} and ${JSON.stringify(next)}`);
             }
         }
+        await this._progressCallback?.(80);
 
         // append 'boot.json'
         modMeta.fileMeta['boot.json'] = modMeta.bootJsonFile;
@@ -618,11 +631,16 @@ export class ModPackFileReader {
             );
         }
 
+        await this._progressCallback?.(99);
+
         // ok
         this.modMeta = modMeta;
         this.fileDataStartPos = fileDataStartPos;
         this.xchacha20Key = xchacha20Key;
         this.xchacha20Nonce = xchacha20Nonce;
+
+        await this._progressCallback?.(100);
+
         return modMeta;
     }
 

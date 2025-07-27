@@ -204,9 +204,13 @@ async function testReadFile() {
         throw new Error(`File ${filePath} is empty or does not exist.`);
     }
     // console.log('data', data.length);
+    reader.progressCallback = async (p) => {
+        console.log('progress:', p);
+    };
     await reader.load(
         data,
         '123456789abcdefghijklmnopqrstuvwxyz123456789abcdefghijklmnopqrstuvwxyz123456789abcdefghijklmnopqrstuvwxyz123456789abcdefghijklmnopqrstuvwxyz123456789abcdefghijklmnopqrstuvwxyz123456789abcdefghijklmnopqrstuvwxyz',
+        // ''
     );
     console.log('modMeta', reader.modMetaInfo);
 
@@ -223,9 +227,9 @@ async function testReadFile() {
     // compare the file list
     const fileList = reader.getFileList();
     console.log('fileList', fileList);
-    if (fileList.length !== filePathList.length) {
-        console.error(`File list length mismatch: expected ${filePathList.length}, got ${fileList.length}`);
-        throw new Error(`File list length mismatch: expected ${filePathList.length}, got ${fileList.length}`);
+    if (fileList.length !== filePathList.length + 1) {
+        console.error(`File list length mismatch: expected ${filePathList.length} + 1, got ${fileList.length}`);
+        throw new Error(`File list length mismatch: expected ${filePathList.length} + 1, got ${fileList.length}`);
     }
     for (const fileName of filePathList) {
         if (!fileList.includes(fileName)) {
@@ -260,8 +264,8 @@ async function testReadFile() {
 }
 
 
-;(testMakeFile().catch(console.error));
-// ;(testReadFile().catch(console.error));
+// ;(testMakeFile().catch(console.error));
+;(testReadFile().catch(console.error));
 
 // ;(async () => {
 //     await testMakeFile();
