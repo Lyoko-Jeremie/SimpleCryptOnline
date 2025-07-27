@@ -259,9 +259,9 @@
 
         .progress-fill {
             height: 100%;
-            background: linear-gradient(90deg, 
-                transparent 0%, 
-                #007bff 50%, 
+            background: linear-gradient(90deg,
+                transparent 0%,
+                #007bff 50%,
                 transparent 100%);
             width: 50%;
             position: absolute;
@@ -516,8 +516,6 @@
     </div>
 
     <!-- 在生产环境中，这些脚本会通过 webpack 构建 -->
-    <script src="https://cdn.jsdelivr.net/npm/libsodium-wrappers-sumo@0.7.11/dist/browsers-sumo/sodium.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
     <script src="modpack.js"></script>
 
     <script>
@@ -541,26 +539,26 @@
             updateProgress(step) {
                 this.currentStep = step;
                 const currentStepInfo = this.initSteps[step];
-                
+
                 document.getElementById('initProgressFill').style.width = currentStepInfo.progress + '%';
                 document.getElementById('initStatus').textContent = currentStepInfo.description;
-                
+
                 console.log(`初始化步骤 ${step + 1}/${this.initSteps.length}: ${currentStepInfo.description}`);
             }
 
             async waitForLibsodium() {
                 try {
                     this.updateProgress(0);
-                    
+
                     // 检查 libsodium-wrappers-sumo 是否已加载
                     if (typeof sodium === 'undefined') {
                         throw new Error('libsodium-wrappers-sumo 未加载');
                     }
-                    
+
                     // 等待 libsodium 初始化完成
                     await sodium.ready;
                     console.log('libsodium 初始化完成');
-                    
+
                     this.updateProgress(1);
                     return true;
                 } catch (error) {
@@ -575,11 +573,11 @@
                     if (typeof xxhash === 'undefined') {
                         throw new Error('xxhash-wasm 未加载');
                     }
-                    
+
                     // 初始化 xxhash
                     await xxhash();
                     console.log('xxhash 初始化完成');
-                    
+
                     this.updateProgress(2);
                     return true;
                 } catch (error) {
@@ -594,9 +592,9 @@
                     if (typeof ModPack === 'undefined') {
                         throw new Error('ModPack 模块未加载');
                     }
-                    
+
                     console.log('ModPack 模块加载完成');
-                    
+
                     this.updateProgress(3);
                     return true;
                 } catch (error) {
@@ -608,15 +606,15 @@
             async initialize() {
                 try {
                     console.log('开始初始化加密库...');
-                    
+
                     // 逐步初始化各个库
                     await this.waitForLibsodium();
                     await this.waitForXxhash();
                     await this.waitForModPack();
-                    
+
                     this.isReady = true;
                     this.onInitializationComplete();
-                    
+
                 } catch (error) {
                     console.error('初始化失败:', error);
                     this.onInitializationError(error);
@@ -625,15 +623,15 @@
 
             onInitializationComplete() {
                 console.log('所有库初始化完成！');
-                
+
                 // 显示完成状态
                 document.getElementById('initSpinner').style.display = 'none';
                 document.getElementById('initCheck').classList.remove('hidden');
                 document.getElementById('initStatus').textContent = '初始化完成！';
-                
+
                 // 触发自定义事件
                 document.dispatchEvent(new CustomEvent('initializationComplete'));
-                
+
                 // 短暂延迟后隐藏初始化界面
                 setTimeout(() => {
                     document.getElementById('initOverlay').style.display = 'none';
@@ -642,7 +640,7 @@
 
             onInitializationError(error) {
                 console.error('初始化错误:', error);
-                
+
                 // 显示错误状态
                 document.getElementById('initSpinner').style.display = 'none';
                 document.getElementById('initError').classList.remove('hidden');
@@ -656,7 +654,7 @@
         // 页面加载完成后开始初始化
         document.addEventListener('DOMContentLoaded', () => {
             console.log('页面加载完成，开始初始化...');
-            
+
             // 延迟一小段时间确保外部脚本已加载
             setTimeout(() => {
                 initManager.initialize();
@@ -670,14 +668,14 @@
                     resolve();
                     return;
                 }
-                
+
                 const checkInterval = setInterval(() => {
                     if (initManager.isReady) {
                         clearInterval(checkInterval);
                         resolve();
                     }
                 }, 100);
-                
+
                 // 30秒超时
                 setTimeout(() => {
                     clearInterval(checkInterval);
@@ -745,7 +743,7 @@
             try {
                 // 确保初始化完成
                 await waitForInitialization();
-                
+
                 showLoading('zipLoadingSection', true);
                 hideError('zipErrorSection');
                 hideSuccess('zipSuccessSection');
@@ -838,7 +836,7 @@
             try {
                 // 确保初始化完成
                 await waitForInitialization();
-                
+
                 showLoading('modpackLoadingSection', true);
                 hideError('modpackErrorSection');
                 hideSuccess('modpackSuccessSection');
@@ -1063,7 +1061,7 @@
             convertButtons.forEach(button => {
                 button.disabled = false;
             });
-            
+
             // 恢复按钮文本
             document.querySelector('#zip2modpack .convert-btn').textContent = '转换为 ModPack';
             document.querySelector('#modpack2zip .convert-btn').textContent = '转换为 ZIP';
