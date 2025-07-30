@@ -6,7 +6,7 @@ import type {ModPackFileReaderJsZipAdaptor} from "../../../../dist-BeforeSC2/Mod
 import {isModPackFileReaderJsZipAdaptor} from "../../../../dist-BeforeSC2/JSZipLikeReadOnlyInterface";
 import {isString} from 'lodash';
 import {ready} from 'libsodium-wrappers';
-import {calcKeyFromPasswordBrowser, decryptFile} from './CryptoTool';
+import {calcKeyFromPasswordBrowser, decryptFile, decryptXChaCha20Key} from './CryptoTool';
 import {getStringTable} from "./GUI_StringTable/StringTable";
 import {ISimpleCryptWrapper} from "./ISimpleCryptWrapper";
 import {setRef} from "./CalcRef";
@@ -14,9 +14,11 @@ import {setRef} from "./CalcRef";
 const ST = getStringTable();
 
 export interface CryptDataItem {
-    crypt: string;
-    nonce: string;
-    salt: string;
+    cryptFile: string;
+    ciphertextKeyXChaCha20: string;
+    nonceXChaCha20: string;
+    nonceAdae: string;
+    saltPwd: string;
 }
 
 const PasswordHintFile = 'passwordHintFile.txt';
@@ -85,15 +87,21 @@ export class SimpleCryptWrapperModPack implements ISimpleCryptWrapper {
             mod.mod.bootJson.additionBinaryFile?.forEach((T) => {
                 let fileName = '';
                 let typeName: keyof CryptDataItem;
-                if (T.endsWith('.crypt')) {
-                    fileName = T.slice(0, -6);
-                    typeName = 'crypt';
-                } else if (T.endsWith('.nonce')) {
-                    fileName = T.slice(0, -6);
-                    typeName = 'nonce';
-                } else if (T.endsWith('.salt')) {
-                    fileName = T.slice(0, -5);
-                    typeName = 'salt';
+                if (T.endsWith('.cryptFile')) {
+                    fileName = T.slice(0, -10);
+                    typeName = 'cryptFile';
+                } else if (T.endsWith('.ciphertextKeyXChaCha20')) {
+                    fileName = T.slice(0, -23);
+                    typeName = 'ciphertextKeyXChaCha20';
+                } else if (T.endsWith('.nonceXChaCha20')) {
+                    fileName = T.slice(0, -15);
+                    typeName = 'nonceXChaCha20';
+                } else if (T.endsWith('.nonceAdae')) {
+                    fileName = T.slice(0, -10);
+                    typeName = 'nonceAdae';
+                } else if (T.endsWith('.saltPwd')) {
+                    fileName = T.slice(0, -8);
+                    typeName = 'saltPwd';
                 } else {
                     console.warn(`[${this.ModName}] Unknown file type`, T);
                     this.logger.warn(`[${this.ModName}] Unknown file type [${T}]`);
@@ -106,7 +114,7 @@ export class SimpleCryptWrapperModPack implements ISimpleCryptWrapper {
                 nn[typeName] = T;
             });
             for (const nn of cdi) {
-                if (!(nn[1].crypt && nn[1].nonce && nn[1].salt)) {
+                if (!(nn[1].ciphertextKeyXChaCha20 && nn[1].nonceXChaCha20 && nn[1].nonceAdae && nn[1].saltPwd && nn[1].cryptFile)) {
                     console.warn(`[${this.ModName}] Missing file`, [nn]);
                     this.logger.warn(`[${this.ModName}] Missing file [${nn[0]}]`);
                     continue;
@@ -118,23 +126,28 @@ export class SimpleCryptWrapperModPack implements ISimpleCryptWrapper {
                     continue;
                 }
                 const modpack: ModPackFileReaderJsZipAdaptor = pack;
-                const crypt = await modpack.readFile(nn[1].crypt);
-                const nonce = await modpack.readFile(nn[1].nonce);
-                const salt = await modpack.readFile(nn[1].salt);
-                // const crypt = await pack.file(nn[1].crypt)?.async('uint8array');
-                // const nonce = await pack.file(nn[1].nonce)?.async('uint8array');
-                // const salt = await pack.file(nn[1].salt)?.async('uint8array');
-                if (!(crypt && nonce && salt)) {
-                    console.warn(`[${this.ModName}] cannot get file from zip`, [nn, crypt, nonce, salt]);
+                const ciphertextKeyXChaCha20 = await modpack.readFile(nn[1].ciphertextKeyXChaCha20);
+                const nonceXChaCha20 = await modpack.readFile(nn[1].nonceXChaCha20);
+                const nonceAdae = await modpack.readFile(nn[1].nonceAdae);
+                const saltPwd = await modpack.readFile(nn[1].saltPwd);
+                const cryptFileBlockDataArea = await modpack.readFile(nn[1].cryptFile);
+                if (!(ciphertextKeyXChaCha20 && nonceXChaCha20 && nonceAdae && saltPwd && cryptFileBlockDataArea)) {
+                    console.warn(`[${this.ModName}] cannot get file from zip`, [nn, ciphertextKeyXChaCha20, nonceXChaCha20, nonceAdae, saltPwd, cryptFileBlockDataArea]);
                     this.logger.warn(`[${this.ModName}] cannot get file from zip [${nn[0]}]`);
                     continue;
                 }
                 const tryDecrypt = async (password: string) => {
-                    const key = await calcKeyFromPasswordBrowser(password, salt);
-                    return await decryptFile(
-                        crypt,
+                    const key = await calcKeyFromPasswordBrowser(password, saltPwd);
+                    const keyXChaCha20 = await decryptXChaCha20Key(
+                        ciphertextKeyXChaCha20,
+                        nonceAdae,
+                        nonceXChaCha20,
                         key,
-                        nonce,
+                    )
+                    return await decryptFile(
+                        cryptFileBlockDataArea,
+                        keyXChaCha20,
+                        nonceXChaCha20,
                     );
                 }
                 let decryptZip: Uint8Array | undefined = undefined;

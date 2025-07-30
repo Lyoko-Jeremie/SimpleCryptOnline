@@ -1,4 +1,3 @@
-
 import {
     ready,
     randombytes_buf,
@@ -20,6 +19,10 @@ import {
     to_base64,
     from_hex,
     from_base64,
+    crypto_stream_xchacha20_keygen,
+    crypto_stream_xchacha20_KEYBYTES,
+    crypto_stream_xchacha20_NONCEBYTES,
+    crypto_stream_xchacha20_xor_ic,
 } from 'libsodium-wrappers-sumo';
 
 
@@ -89,24 +92,74 @@ export async function calcKeyFromPasswordBrowser(password: string, salt: Uint8Ar
     );
 }
 
-export async function encryptFile(data: Uint8Array, key: Uint8Array, additionalData: Uint8Array | null = null) {
+export async function encryptFile(data: Uint8Array, keyXChaCha20: Uint8Array, nonceXChaCha20: Uint8Array, blockSize = 64,) {
     await ready;
-    if (!(crypto_aead_chacha20poly1305_KEYBYTES === key.length)) {
-        return Promise.reject(new Error('key length error'));
-    }
-    const nonce = randombytes_buf(crypto_aead_chacha20poly1305_NPUBBYTES);
-    const ciphertext = crypto_aead_chacha20poly1305_encrypt(data, null, null, nonce, key);
-    return {nonce: nonce, ciphertext: ciphertext};
-}
-
-export async function decryptFile(data: Uint8Array, key: Uint8Array, nonce: Uint8Array, additionalData: Uint8Array | null = null) {
-    // TODO
-    await ready;
-    if (!(crypto_aead_chacha20poly1305_NPUBBYTES === nonce.length)) {
+    if (!(crypto_aead_chacha20poly1305_NPUBBYTES === nonceXChaCha20.length)) {
         return Promise.reject(new Error('nonce length error'));
     }
-    if (!(crypto_aead_chacha20poly1305_KEYBYTES === key.length)) {
+    if (!(crypto_aead_chacha20poly1305_KEYBYTES === keyXChaCha20.length)) {
         return Promise.reject(new Error('key length error'));
     }
-    return crypto_aead_chacha20poly1305_decrypt(null, data, additionalData, nonce, key);
+    let blockCount = Math.ceil(data.length / blockSize);
+    while (blockCount * blockSize < data.length) {
+        const d = crypto_stream_xchacha20_xor_ic(
+            data.subarray(blockCount * blockSize, blockCount * blockSize + blockSize),
+            nonceXChaCha20,
+            blockCount,
+            keyXChaCha20,
+        );
+        data.set(d, blockCount * blockSize);
+        blockCount++;
+    }
+    const d = crypto_stream_xchacha20_xor_ic(
+        data.subarray(blockCount * blockSize),
+        nonceXChaCha20,
+        blockCount,
+        keyXChaCha20,
+    );
+    data.set(d, blockCount * blockSize);
+    return data;
+}
+
+export async function decryptFile(data: Uint8Array, keyXChaCha20: Uint8Array, nonceXChaCha20: Uint8Array, blockSize = 64,) {
+    // for crypto_stream_xchacha20_xor_ic , Decrypting is the same as encrypting in this case . because it is a xor operation.
+    return await encryptFile(data, keyXChaCha20, nonceXChaCha20, blockSize);
+}
+
+export async function encryptXChaCha20Key(adaeKey: Uint8Array, additionalData: Uint8Array | null = null) {
+    await ready;
+    const keyXChaCha20 = crypto_stream_xchacha20_keygen();
+    const nonceXChaCha20 = await randombytes_buf(crypto_stream_xchacha20_NONCEBYTES);
+    const nonceAdae = randombytes_buf(crypto_aead_chacha20poly1305_NPUBBYTES);
+    const ciphertextXChaCha20 = crypto_aead_chacha20poly1305_encrypt(keyXChaCha20, additionalData, null, nonceAdae, adaeKey);
+    return {
+        keyXChaCha20: keyXChaCha20,
+        nonceXChaCha20: nonceXChaCha20,
+        nonceAdae: nonceAdae,
+        ciphertextXChaCha20: ciphertextXChaCha20,
+    };
+}
+
+export async function decryptXChaCha20Key(
+    ciphertextKeyXChaCha20: Uint8Array,
+    nonceAdae: Uint8Array,
+    nonceXChaCha20: Uint8Array,
+    adaeKey: Uint8Array,
+    additionalData: Uint8Array | null = null,
+) {
+    await ready;
+    if (!(crypto_aead_chacha20poly1305_NPUBBYTES === nonceAdae.length)) {
+        return Promise.reject(new Error('nonceAdae length error'));
+    }
+    if (!(crypto_stream_xchacha20_NONCEBYTES === nonceXChaCha20.length)) {
+        return Promise.reject(new Error('nonceXChaCha20 length error'));
+    }
+    if (!(crypto_aead_chacha20poly1305_KEYBYTES === adaeKey.length)) {
+        return Promise.reject(new Error('adaeKey length error'));
+    }
+    const keyXChaCha20 = crypto_aead_chacha20poly1305_decrypt(null, ciphertextKeyXChaCha20, additionalData, nonceAdae, adaeKey);
+    if (!(crypto_stream_xchacha20_KEYBYTES === keyXChaCha20.length)) {
+        return Promise.reject(new Error('keyXChaCha20 length error'));
+    }
+    return keyXChaCha20;
 }
