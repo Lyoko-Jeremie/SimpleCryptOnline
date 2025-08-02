@@ -5,9 +5,12 @@
   "scripts": {
     "webpack:serve": "webpack serve -w -c ./webpack.config.js",
     "======================0": "",
+    "ts:w": "tsc -w -p ./src_mod/src_boot/tsconfig.json",
+    "webpack:mod:w": "webpack -w -c ./webpack-mod.config.js",
     "webpack:w": "webpack -w -c ./webpack.config.js",
     "webpack:tools:w": "webpack -w -c ./webpack-tools.config.js",
     "======================1": "",
+    "build:ts": "tsc -p ./src_mod/src_boot/tsconfig.json",
     "build:webpack": "webpack -c ./webpack.config.js",
     "webpack:tools": "webpack -c ./webpack-tools.config.js",
     "======================2": "",

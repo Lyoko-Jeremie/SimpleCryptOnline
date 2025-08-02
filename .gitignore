@@ -25,6 +25,7 @@ i18n.json
 
 #tools/test-*
 tools/test-file/**/*
+tools/test-mod/**/*
 webpack-tools-test.config.js
 *.mod.zip.crypt
 *.mod.zip.nonce

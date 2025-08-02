@@ -94,10 +94,10 @@ export async function calcKeyFromPasswordBrowser(password: string, salt: Uint8Ar
 
 export async function encryptFile(data: Uint8Array, keyXChaCha20: Uint8Array, nonceXChaCha20: Uint8Array, blockSize = 64,) {
     await ready;
-    if (!(crypto_aead_chacha20poly1305_NPUBBYTES === nonceXChaCha20.length)) {
+    if (!(crypto_stream_xchacha20_NONCEBYTES === nonceXChaCha20.length)) {
         return Promise.reject(new Error('nonce length error'));
     }
-    if (!(crypto_aead_chacha20poly1305_KEYBYTES === keyXChaCha20.length)) {
+    if (!(crypto_stream_xchacha20_KEYBYTES === keyXChaCha20.length)) {
         return Promise.reject(new Error('key length error'));
     }
     let blockCount = Math.ceil(data.length / blockSize);
@@ -111,13 +111,6 @@ export async function encryptFile(data: Uint8Array, keyXChaCha20: Uint8Array, no
         data.set(d, blockCount * blockSize);
         blockCount++;
     }
-    const d = crypto_stream_xchacha20_xor_ic(
-        data.subarray(blockCount * blockSize),
-        nonceXChaCha20,
-        blockCount,
-        keyXChaCha20,
-    );
-    data.set(d, blockCount * blockSize);
     return data;
 }
 
@@ -131,12 +124,12 @@ export async function encryptXChaCha20Key(adaeKey: Uint8Array, additionalData: U
     const keyXChaCha20 = crypto_stream_xchacha20_keygen();
     const nonceXChaCha20 = await randombytes_buf(crypto_stream_xchacha20_NONCEBYTES);
     const nonceAdae = randombytes_buf(crypto_aead_chacha20poly1305_NPUBBYTES);
-    const ciphertextXChaCha20 = crypto_aead_chacha20poly1305_encrypt(keyXChaCha20, additionalData, null, nonceAdae, adaeKey);
+    const ciphertextKeyXChaCha20 = crypto_aead_chacha20poly1305_encrypt(keyXChaCha20, additionalData, null, nonceAdae, adaeKey);
     return {
         keyXChaCha20: keyXChaCha20,
         nonceXChaCha20: nonceXChaCha20,
         nonceAdae: nonceAdae,
-        ciphertextXChaCha20: ciphertextXChaCha20,
+        ciphertextKeyXChaCha20: ciphertextKeyXChaCha20,
     };
 }
 

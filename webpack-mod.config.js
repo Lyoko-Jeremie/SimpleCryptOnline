@@ -16,10 +16,10 @@ const TsconfigPathsPlugin = require('tsconfig-paths-webpack-plugin');
 const config = {
   // https://webpack.js.org/configuration/entry-context/#entry
   entry: {
-    encryptTool: './tools/test-encrytTool.ts',
+    SimpleCryptWrapperModPack: './src_mod/src/init.ts',
   },
   output: {
-    path: path.resolve(__dirname, 'dist-tools'),
+    path: path.resolve(__dirname, 'dist-mod'),
     filename: '[name].js',
   },
   // https://webpack.js.org/configuration/devtool/
