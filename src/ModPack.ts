@@ -23,17 +23,17 @@ import xxhash from "xxhash-wasm";
 // import {
 //     streamXOR,
 // } from './@stablelib/xchacha20';
-import {
-    Chacha20,
-} from 'ts-chacha20';
+// import {
+//     Chacha20,
+// } from 'ts-chacha20';
 
 const crypto_stream_chacha20_KEYBYTES = 256;
 const crypto_stream_chacha20_NONCEBYTES = 96;
 const crypto_stream_chacha20_COUNTERBYTES = 32;
 const crypto_pwhash_SALTBYTES = 8;
-import {
-    randomBytes,
-} from './@stablelib/random';
+// import {
+//     randomBytes,
+// } from './@stablelib/random';
 import {
     decode as from_base64,
     encode as to_base64,
@@ -41,8 +41,11 @@ import {
 // import bcryptjs from 'bcryptjs';
 import argon2 from 'argon2-browser';
 
+import {xchacha20} from '@noble/ciphers/chacha.js';
+
 import {BlockSize, CryptoInfo, FileMeta, MagicNumber, ModMeta, ModMetaProtocolVersion} from "./ModMeta";
 import {ModPackFileReaderInterface} from "./ModPackFileReaderInterface";
+import {randombytes_buf} from "./randombytes_buf";
 
 function paddingToBlockSize(data: Uint8Array, blockSize: number, padN?: number): {
     blocks: number,
@@ -74,7 +77,7 @@ function paddingToBlockSize(data: Uint8Array, blockSize: number, padN?: number):
     const padding = new Uint8Array(paddingLength);
     for (let i = 0; i < paddingLength; i++) {
         // Fill padding with random bytes
-        padding[i] = padN === undefined ? (randomBytes(1)[0] & 0xff) : (padN & 0xff);
+        padding[i] = padN === undefined ? (randombytes_buf(1)[0] & 0xff) : (padN & 0xff);
     }
     const paddedData = new Uint8Array(data.length + paddingLength);
     paddedData.set(data);
@@ -162,10 +165,10 @@ export async function covertFromZipMod(
     let cryptoInfo: CryptoInfo | undefined;
     if (password) {
         cryptoInfo = {} as CryptoInfo;
-        const xchacha20Nonce = randomBytes(crypto_stream_chacha20_NONCEBYTES);
+        const xchacha20Nonce = randombytes_buf(crypto_stream_chacha20_NONCEBYTES);
         const xchacha20NonceBase64 = to_base64(xchacha20Nonce);
         cryptoInfo['Xchacha20NonceBase64'] = xchacha20NonceBase64;
-        const pwhashSalt = randomBytes(crypto_pwhash_SALTBYTES);
+        const pwhashSalt = randombytes_buf(crypto_pwhash_SALTBYTES);
         const pwhashSaltBase64 = to_base64(pwhashSalt);
         cryptoInfo['PwhashSaltBase64'] = pwhashSaltBase64;
         // const xchacha20Key = crypto_pwhash(
@@ -387,12 +390,14 @@ export async function covertFromZipMod(
         //     xchacha20Key,
         //     'uint8array',
         // );
-        const chacha20 = new Chacha20(
-            xchacha20Key,
-            xchacha20Nonce,
-            blockIndex,
-        );
-        const encryptedBlock = chacha20.encrypt(blockData);
+        // const chacha20 = new Chacha20(
+        //     xchacha20Key,
+        //     xchacha20Nonce,
+        //     blockIndex,
+        // );
+        // const encryptedBlock = chacha20.encrypt(blockData);
+
+        const encryptedBlock = xchacha20(xchacha20Key, xchacha20Nonce, blockData, undefined, blockIndex);
 
         modPackBuffer.set(encryptedBlock, blockStartPos);
         blockPosIndex++;
@@ -680,12 +685,14 @@ export class ModPackFileReader implements ModPackFileReaderInterface {
             //     this.xchacha20Key,
             //     'uint8array',
             // );
-            const chacha20 = new Chacha20(
-                this.xchacha20Key,
-                this.xchacha20Nonce,
-                blockIndex
-            );
-            const decryptedBlockData = chacha20.decrypt(blockData);
+            // const chacha20 = new Chacha20(
+            //     this.xchacha20Key,
+            //     this.xchacha20Nonce,
+            //     blockIndex
+            // );
+            // const decryptedBlockData = chacha20.decrypt(blockData);
+
+            const decryptedBlockData = xchacha20(this.xchacha20Key, this.xchacha20Nonce, blockData, undefined, blockIndex);
 
             // console.log('offset', offset);
             // console.log('fileData', fileData.length);
