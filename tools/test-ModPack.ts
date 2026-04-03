@@ -6,7 +6,6 @@ import {
     covertFromZipMod,
     ModPackFileReader,
 } from '../src/ModPack';
-import * as console from "node:console";
 
 async function readFile(path: string): Promise<Uint8Array> {
     return fs.readFile(path, {
@@ -159,8 +158,8 @@ async function testMakeFile() {
             }
             return d;
         },
-        // '123456789abcdefghijklmnopqrstuvwxyz123456789abcdefghijklmnopqrstuvwxyz123456789abcdefghijklmnopqrstuvwxyz123456789abcdefghijklmnopqrstuvwxyz123456789abcdefghijklmnopqrstuvwxyz123456789abcdefghijklmnopqrstuvwxyz',
-        '',
+        '123456789abcdefghijklmnopqrstuvwxyz123456789abcdefghijklmnopqrstuvwxyz123456789abcdefghijklmnopqrstuvwxyz123456789abcdefghijklmnopqrstuvwxyz123456789abcdefghijklmnopqrstuvwxyz123456789abcdefghijklmnopqrstuvwxyz',
+        // '',
         async (p) => {
             console.log('progress:', p);
         }
@@ -169,6 +168,7 @@ async function testMakeFile() {
     console.log('modMeta');
     console.log(out.ext);
     console.log(out.modMeta);
+    console.log(`${fileRoot}/${modName}${out.ext}`);
     await fs.writeFile(
         `${fileRoot}/${modName}${out.ext}`,
         out.modPackBuffer,
@@ -264,7 +264,7 @@ async function testReadFile() {
 }
 
 
-// ;(testMakeFile().catch(console.error));
+;(testMakeFile().catch(console.error));
 ;(testReadFile().catch(console.error));
 
 // ;(async () => {

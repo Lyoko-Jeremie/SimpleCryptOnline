@@ -37,7 +37,7 @@ export interface CryptoInfo {
 }
 
 export const MagicNumber = new Uint8Array([0x4A, 0x65, 0x72, 0x65, 0x6D, 0x69, 0x65, 0x4D, 0x6F, 0x64, 0x4C, 0x6F, 0x61, 0x64, 0x65, 0x72]);
-export const ModMetaProtocolVersion = 1; // Version of the mod pack protocol
+export const ModMetaProtocolVersion = 2; // Version of the mod pack protocol
 export const BlockSize = 64; // default block size
 
 export interface ModMeta {

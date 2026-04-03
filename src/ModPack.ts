@@ -3,23 +3,43 @@ import {BSON} from 'bson';
 // @ts-ignore
 import xxhash from "xxhash-wasm";
 
+// import {
+//     ready,
+//     randombytes_buf,
+//     crypto_stream_xchacha20_xor_ic,
+//     crypto_stream_xchacha20_KEYBYTES,
+//     crypto_stream_xchacha20_NONCEBYTES,
+//     to_hex,
+//     to_base64,
+//     from_hex,
+//     from_base64,
+//     randombytes_uniform,
+//     crypto_pwhash,
+//     crypto_pwhash_SALTBYTES,
+//     crypto_pwhash_ALG_DEFAULT,
+//     crypto_pwhash_OPSLIMIT_INTERACTIVE,
+//     crypto_pwhash_MEMLIMIT_INTERACTIVE,
+// } from 'libsodium-wrappers-sumo';
+// import {
+//     streamXOR,
+// } from './@stablelib/xchacha20';
 import {
-    ready,
-    randombytes_buf,
-    crypto_stream_xchacha20_xor_ic,
-    crypto_stream_xchacha20_KEYBYTES,
-    crypto_stream_xchacha20_NONCEBYTES,
-    to_hex,
-    to_base64,
-    from_hex,
-    from_base64,
-    randombytes_uniform,
-    crypto_pwhash,
-    crypto_pwhash_SALTBYTES,
-    crypto_pwhash_ALG_DEFAULT,
-    crypto_pwhash_OPSLIMIT_INTERACTIVE,
-    crypto_pwhash_MEMLIMIT_INTERACTIVE,
-} from 'libsodium-wrappers-sumo';
+    Chacha20,
+} from 'ts-chacha20';
+
+const crypto_stream_chacha20_KEYBYTES = 256;
+const crypto_stream_chacha20_NONCEBYTES = 96;
+const crypto_stream_chacha20_COUNTERBYTES = 32;
+const crypto_pwhash_SALTBYTES = 8;
+import {
+    randomBytes,
+} from './@stablelib/random';
+import {
+    decode as from_base64,
+    encode as to_base64,
+} from 'uint8-to-base64';
+// import bcryptjs from 'bcryptjs';
+import argon2 from 'argon2-browser';
 
 import {BlockSize, CryptoInfo, FileMeta, MagicNumber, ModMeta, ModMetaProtocolVersion} from "./ModMeta";
 import {ModPackFileReaderInterface} from "./ModPackFileReaderInterface";
@@ -54,7 +74,7 @@ function paddingToBlockSize(data: Uint8Array, blockSize: number, padN?: number):
     const padding = new Uint8Array(paddingLength);
     for (let i = 0; i < paddingLength; i++) {
         // Fill padding with random bytes
-        padding[i] = padN === undefined ? randombytes_uniform(0xff) : (padN & 0xff);
+        padding[i] = padN === undefined ? (randomBytes(1)[0] & 0xff) : (padN & 0xff);
     }
     const paddedData = new Uint8Array(data.length + paddingLength);
     paddedData.set(data);
@@ -117,7 +137,6 @@ export async function covertFromZipMod(
     progressCallback?: (progress: number) => any | Promise<any>,
     bootFilePath: string = 'boot.json',
 ) {
-    await ready;
     const xxhashApi = await xxhash();
 
     await progressCallback?.(0);
@@ -143,10 +162,10 @@ export async function covertFromZipMod(
     let cryptoInfo: CryptoInfo | undefined;
     if (password) {
         cryptoInfo = {} as CryptoInfo;
-        const xchacha20Nonce = randombytes_buf(crypto_stream_xchacha20_NONCEBYTES, 'uint8array');
+        const xchacha20Nonce = randomBytes(crypto_stream_chacha20_NONCEBYTES);
         const xchacha20NonceBase64 = to_base64(xchacha20Nonce);
         cryptoInfo['Xchacha20NonceBase64'] = xchacha20NonceBase64;
-        const pwhashSalt = randombytes_buf(crypto_pwhash_SALTBYTES, 'uint8array');
+        const pwhashSalt = randomBytes(crypto_pwhash_SALTBYTES);
         const pwhashSaltBase64 = to_base64(pwhashSalt);
         cryptoInfo['PwhashSaltBase64'] = pwhashSaltBase64;
         // const xchacha20Key = crypto_pwhash(
@@ -323,20 +342,28 @@ export async function covertFromZipMod(
     // Encrypt the modPackBuffer with xchacha20 , only the file data part , block by block , inplace encryption
 
     const xchacha20Nonce: Uint8Array = from_base64(cryptoInfo.Xchacha20NonceBase64);
-    if (xchacha20Nonce.length !== crypto_stream_xchacha20_NONCEBYTES) {
-        console.error(`Invalid xchacha20 nonce length: ${xchacha20Nonce.length}, expected: ${crypto_stream_xchacha20_NONCEBYTES}`);
-        throw new Error(`Invalid xchacha20 nonce length: ${xchacha20Nonce.length}, expected: ${crypto_stream_xchacha20_NONCEBYTES}`);
+    if (xchacha20Nonce.length !== crypto_stream_chacha20_NONCEBYTES) {
+        console.error(`Invalid chacha20 nonce length: ${xchacha20Nonce.length}, expected: ${crypto_stream_chacha20_NONCEBYTES}`);
+        throw new Error(`Invalid chacha20 nonce length: ${xchacha20Nonce.length}, expected: ${crypto_stream_chacha20_NONCEBYTES}`);
     }
-    const pwhashSalt: Uint8Array = from_base64(cryptoInfo.PwhashSaltBase64);
-    const xchacha20Key = crypto_pwhash(
-        crypto_stream_xchacha20_KEYBYTES,
-        password ?? '',
-        pwhashSalt,
-        crypto_pwhash_OPSLIMIT_INTERACTIVE,
-        crypto_pwhash_MEMLIMIT_INTERACTIVE,
-        crypto_pwhash_ALG_DEFAULT,
-        'uint8array',
-    );
+    // const pwhashSalt: Uint8Array = from_base64(cryptoInfo.PwhashSaltBase64);
+    // const xchacha20Key = crypto_pwhash(
+    //     crypto_stream_xchacha20_KEYBYTES,
+    //     password ?? '',
+    //     pwhashSalt,
+    //     crypto_pwhash_OPSLIMIT_INTERACTIVE,
+    //     crypto_pwhash_MEMLIMIT_INTERACTIVE,
+    //     crypto_pwhash_ALG_DEFAULT,
+    //     'uint8array',
+    // );
+    const pHash = await argon2.hash({
+        pass: password ?? '',
+        salt: cryptoInfo.PwhashSaltBase64,
+        time: 1, // the number of iterations
+        mem: 1024, // used memory, in KiB
+        hashLen: crypto_stream_chacha20_KEYBYTES, // desired hash length
+    });
+    const xchacha20Key = pHash.hash;
 
     let blockPosIndex = 0;
     const blockIndexLast = bockIndex;
@@ -353,13 +380,20 @@ export async function covertFromZipMod(
             console.warn(`Block data length is less than block size: ${blockData.length} < ${BlockSize}`);
             throw new Error(`Block data length is less than block size: ${blockData.length} < ${BlockSize}`);
         }
-        const encryptedBlock = crypto_stream_xchacha20_xor_ic(
-            blockData,
+        // const encryptedBlock = crypto_stream_xchacha20_xor_ic(
+        //     blockData,
+        //     xchacha20Nonce,
+        //     blockIndex,
+        //     xchacha20Key,
+        //     'uint8array',
+        // );
+        const chacha20 = new Chacha20(
+            xchacha20Key,
             xchacha20Nonce,
             blockIndex,
-            xchacha20Key,
-            'uint8array',
         );
+        const encryptedBlock = chacha20.encrypt(blockData);
+
         modPackBuffer.set(encryptedBlock, blockStartPos);
         blockPosIndex++;
 
@@ -450,7 +484,6 @@ export class ModPackFileReader implements ModPackFileReaderInterface {
     }
 
     public async load(modPackBuffer: Uint8Array, password?: string): Promise<ModMeta> {
-        await ready;
         const xxhashApi = ModPackFileReader.xxhashApi ?? await xxhash();
         ModPackFileReader.xxhashApi = xxhashApi;
 
@@ -549,9 +582,9 @@ export class ModPackFileReader implements ModPackFileReaderInterface {
                 throw new Error('[ModPackFileReader] Crypto info is incomplete');
             }
             xchacha20Nonce = from_base64(modMeta.cryptoInfo.Xchacha20NonceBase64);
-            if (xchacha20Nonce.length !== crypto_stream_xchacha20_NONCEBYTES) {
-                console.error(`[ModPackFileReader] Invalid xchacha20 nonce length: ${xchacha20Nonce.length}, expected: ${crypto_stream_xchacha20_NONCEBYTES}`);
-                throw new Error(`[ModPackFileReader] Invalid xchacha20 nonce length: ${xchacha20Nonce.length}, expected: ${crypto_stream_xchacha20_NONCEBYTES}`);
+            if (xchacha20Nonce.length !== crypto_stream_chacha20_NONCEBYTES) {
+                console.error(`[ModPackFileReader] Invalid chacha20 nonce length: ${xchacha20Nonce.length}, expected: ${crypto_stream_chacha20_NONCEBYTES}`);
+                throw new Error(`[ModPackFileReader] Invalid chacha20 nonce length: ${xchacha20Nonce.length}, expected: ${crypto_stream_chacha20_NONCEBYTES}`);
             }
             const pwhashSalt = from_base64(modMeta.cryptoInfo.PwhashSaltBase64);
             if (pwhashSalt.length !== crypto_pwhash_SALTBYTES) {
@@ -559,15 +592,23 @@ export class ModPackFileReader implements ModPackFileReaderInterface {
                 throw new Error(`[ModPackFileReader] Invalid pwhash salt length: ${pwhashSalt.length}, expected: ${crypto_pwhash_SALTBYTES}`);
             }
 
-            xchacha20Key = crypto_pwhash(
-                crypto_stream_xchacha20_KEYBYTES,
-                password,
-                pwhashSalt,
-                crypto_pwhash_OPSLIMIT_INTERACTIVE,
-                crypto_pwhash_MEMLIMIT_INTERACTIVE,
-                crypto_pwhash_ALG_DEFAULT,
-                'uint8array',
-            );
+            // xchacha20Key = crypto_pwhash(
+            //     crypto_stream_xchacha20_KEYBYTES,
+            //     password,
+            //     pwhashSalt,
+            //     crypto_pwhash_OPSLIMIT_INTERACTIVE,
+            //     crypto_pwhash_MEMLIMIT_INTERACTIVE,
+            //     crypto_pwhash_ALG_DEFAULT,
+            //     'uint8array',
+            // );
+            const pHash = await argon2.hash({
+                pass: password ?? '',
+                salt: pwhashSalt,
+                time: 1, // the number of iterations
+                mem: 1024, // used memory, in KiB
+                hashLen: crypto_stream_chacha20_KEYBYTES, // desired hash length
+            });
+            xchacha20Key = pHash.hash;
         }
 
         await this._progressCallback?.(99);
@@ -594,7 +635,6 @@ export class ModPackFileReader implements ModPackFileReaderInterface {
     }
 
     protected async getFileByMeta(fileMeta: FileMeta, filePath: string): Promise<Uint8Array | undefined> {
-        await ready;
 
         const fileStartPos = Number(this.fileDataStartPos) + fileMeta.b * this.modMeta.blockSize;
         const fileEndPos = fileStartPos + fileMeta.l;
@@ -633,13 +673,20 @@ export class ModPackFileReader implements ModPackFileReaderInterface {
                 console.error(`[ModPackFileReader] Block ${blockIndex} data length mismatch: expected ${this.modMeta.blockSize}, got ${blockData.length}`);
                 throw new Error(`[ModPackFileReader] Block ${blockIndex} data length mismatch: expected ${this.modMeta.blockSize}, got ${blockData.length}`);
             }
-            const decryptedBlockData = crypto_stream_xchacha20_xor_ic(
-                blockData,
-                this.xchacha20Nonce,
-                blockIndex,
+            // const decryptedBlockData = crypto_stream_xchacha20_xor_ic(
+            //     blockData,
+            //     this.xchacha20Nonce,
+            //     blockIndex,
+            //     this.xchacha20Key,
+            //     'uint8array',
+            // );
+            const chacha20 = new Chacha20(
                 this.xchacha20Key,
-                'uint8array',
+                this.xchacha20Nonce,
+                blockIndex
             );
+            const decryptedBlockData = chacha20.decrypt(blockData);
+
             // console.log('offset', offset);
             // console.log('fileData', fileData.length);
             // console.log('decryptedBlockData', decryptedBlockData.length);
@@ -669,12 +716,10 @@ export class ModPackFileReader implements ModPackFileReaderInterface {
     }
 
     public async getBootJson(): Promise<Uint8Array | undefined> {
-        await ready;
         return this.getFileByMeta(this.modMeta.bootJsonFile, 'boot.json');
     }
 
     public async getFileTree(): Promise<Record<string, any> | undefined> {
-        await ready;
         if (this.fileTree) {
             return this.fileTree;
         }
@@ -701,7 +746,6 @@ export class ModPackFileReader implements ModPackFileReaderInterface {
     }
 
     public async checkValid(): Promise<boolean> {
-        await ready;
         try {
             // Check if modMeta is loaded
             if (!this.modMeta) {

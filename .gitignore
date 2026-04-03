@@ -32,3 +32,5 @@ webpack-tools-test.config.js
 *.mod.zip.salt
 *.modpack.crypt
 *.modpack
+
+.idea/copilot.*

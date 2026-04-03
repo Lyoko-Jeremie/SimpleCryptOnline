@@ -67,6 +67,12 @@ const config = {
     // }),
   ],
   module: {
+    // Makes WebPack think that we don't need to parse this module,
+    // otherwise it tries to recompile it, but fails
+    //
+    // Error: Module not found: Error: Can't resolve 'env'
+    noParse: /\.wasm$/,
+
     rules: [
       {
         test: /\.(ts|tsx)$/i,
@@ -97,6 +103,18 @@ const config = {
       //   use: 'raw-loader',
       // },
 
+      {
+        test: /\.wasm$/,
+        // Tells WebPack that this module should be included as
+        // base64-encoded binary file and not as code
+        loader: 'base64-loader',
+        // Disables WebPack's opinion where WebAssembly should be,
+        // makes it think that it's not WebAssembly
+        //
+        // Error: WebAssembly module is included in initial chunk.
+        type: 'javascript/auto',
+      },
+
       // Add your rules for custom modules here
       // Learn more about loaders from https://webpack.js.org/loaders/
     ],
@@ -113,6 +131,8 @@ const config = {
       // for libsodium
       // only in browser
       crypto: false,
+      fs: false,
+      path: false,
     },
   },
 };
