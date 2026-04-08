@@ -19,7 +19,7 @@ async function test() {
     const packed = await packer.pack(files, modMeta, bootJson);
     console.log("Packed size:", packed.length);
 
-    await fs.promises.writeFile('test-ModPackV2-packed.modpack', packed);
+    // await fs.promises.writeFile('test-ModPackV2-packed.modpack', packed);
 
     console.log("Reading...");
     const reader = new ModReaderV2(packed, api);
