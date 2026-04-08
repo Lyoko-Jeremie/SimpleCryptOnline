@@ -1,3 +1,36 @@
+/**
+ * ModPackV2.ts — JeremieModLoader (JML) 封包文件 V2 实现
+ *
+ * 本文件实现了一套面向数据设计 (Data-Oriented Design) 的现代混合索引虚拟文件系统架构，
+ * 核心目标包括：
+ *   1. 极致零拷贝 (Zero-Copy) — 通过 TypedArray/DataView 视图映射消除反序列化开销
+ *   2. 完美的原地加解密 — 强制 64 字节块对齐，契合 XChaCha20 的内部计数器
+ *   3. 混合查询能力 — O(1) 全路径哈希定位 + O(log N) 目录内二分查找 + 完整 JS 对象树
+ *   4. 灾难恢复 — Local Header 保留完整路径明文，便于 Hex 审查与索引重建
+ *
+ * 整体文件布局 (详见 ModPackV2.md):
+ * ┌──────────────────────────────────────────────┐
+ * │ Global Header            (128 bytes, 定长)    │
+ * ├──────────────────────────────────────────────┤
+ * │ Block Offset Table       (128 bytes, 定长)    │  ← 记录下方各区块的偏移与长度
+ * ├──────────────────────────────────────────────┤
+ * │ ModMeta JSON             (64B 对齐, 明文)     │  ← 文件元数据（算法参数/Nonce 等）
+ * ├──────────────────────────────────────────────┤
+ * │ boot.json                (64B 对齐, 明文)     │  ← 引导信息
+ * ├──────────────────────────────────────────────┤
+ * │ Hash Index Array         (64B 对齐)           │  ← O(1) 全路径定位（xxHash64）
+ * ├──────────────────────────────────────────────┤
+ * │ Tree Node Array          (64B 对齐)           │  ← 拍平的树状节点（目录遍历/二分查找）
+ * ├──────────────────────────────────────────────┤
+ * │ String Pool              (64B 对齐)           │  ← 局部文件名字符串池
+ * ├──────────────────────────────────────────────┤
+ * │ File Stream Region                            │  ← Local Header + File Data 交替排列
+ * │   ├─ [Local Header 1] (64B 对齐, 含完整路径)  │
+ * │   ├─ [File Data 1]    (64B 对齐)              │
+ * │   ├─ [Local Header 2] ...                     │
+ * │   └─ ...                                      │
+ * └──────────────────────────────────────────────┘
+ */
 import {
     BlockOffsets,
     BlockSize,
@@ -12,15 +45,39 @@ import {
 import xxhash from "xxhash-wasm";
 import JSZip from "jszip";
 
-// 用于表示 JS 内存 tree 对象的接口
+/**
+ * JsFileNode — 表示 JS 内存中的文件/目录树节点
+ *
+ * 由 ZeroCopyTree.buildJsObjectTree() 从零拷贝视图中提取生成，
+ * 可用于 UI 文件树展示等常规 JavaScript 使用场景。
+ */
 export interface JsFileNode {
     name: string;
     isFile: boolean;
-    size?: number;             // 仅文件有
-    blockIndex?: number;       // 仅文件有
-    children?: Record<string, JsFileNode>; // 仅目录有，使用 Map/Record 方便访问
+    size?: number;             // 仅文件有：文件的真实字节长度
+    blockIndex?: number;       // 仅文件有：对应 Local Header 的绝对块编号
+    children?: Record<string, JsFileNode>; // 仅目录有：子节点映射表（局部名 → 节点）
 }
 
+/**
+ * ZeroCopyTree — 零拷贝目录树视图
+ *
+ * 直接操作 Tree Node Array 和 String Pool 的二进制缓冲区，
+ * 无需反序列化即可实现目录枚举、二分查找和完整树构建。
+ *
+ * Tree Node Array 结构（每节点 32 字节）:
+ *   [0..3]   name_offset  (uint32) — 局部名在 String Pool 中的字节偏移
+ *   [4..5]   name_length  (uint16) — 局部名的字节长度
+ *   [6..7]   flags        (uint16) — bit 0: 1=目录, 0=文件
+ *   [8..11]  local_hash   (uint32) — 局部名短哈希（保留）
+ *   [12..15] target_index (uint32) — 目录: 子节点起始下标 / 文件: Local Header 块编号
+ *   [16..19] target_size  (uint32) — 目录: 子节点数量 / 文件: 真实字节长度
+ *   [20..31] reserved     (12 bytes)
+ *
+ * 铁律：
+ *   1. 物理连续性 — 同一目录的子节点在数组中必须紧挨
+ *   2. 字典序排列 — 子节点按局部文件名字典序排列，以支持 O(log N) 二分查找
+ */
 export class ZeroCopyTree {
     private treeData: DataView;
     private stringPool: Uint8Array;
@@ -40,19 +97,34 @@ export class ZeroCopyTree {
         }
     }
 
+    /**
+     * 从 String Pool 中读取指定节点的局部文件名
+     * @param nodeIndex 节点在 Tree Node Array 中的索引
+     */
     private readLocalName(nodeIndex: number): string {
+        // 每个节点 32 字节，name_offset 在偏移 0，name_length 在偏移 4
         const offset = nodeIndex * 32;
         const nameOffset = this.treeData.getUint32(offset, true);
-        const nameLen = this.treeData.getUint16(offset + 4, true);
-        const buf = this.stringPool.subarray(nameOffset, nameOffset + nameLen);
-        return this.decoder.decode(buf);
+        const nameLength = this.treeData.getUint16(offset + 4, true);
+        return this.decoder.decode(this.stringPool.subarray(nameOffset, nameOffset + nameLength));
     }
 
+    /**
+     * 就地读取目录内容（类似 fs.readdir）
+     *
+     * 直接从二进制视图中枚举目录的所有子节点名称，
+     * 不产生任何中间对象分配（除了返回的字符串数组）。
+     *
+     * @param dirNodeIndex 目录节点在 Tree Node Array 中的索引（默认 0 = 根目录）
+     * @returns 子节点局部名数组（已按字典序排列）
+     */
     public readDirInPlace(dirNodeIndex: number = 0): string[] {
         const offset = dirNodeIndex * 32;
         const isDir = (this.treeData.getUint16(offset + 6, true) & 1) === 1;
         if (!isDir) throw new Error("Not a directory");
 
+        // target_index (offset+12) = 子节点起始下标
+        // target_size  (offset+16) = 子节点数量
         const childStart = this.treeData.getUint32(offset + 12, true);
         const childCount = this.treeData.getUint32(offset + 16, true);
 
@@ -63,25 +135,44 @@ export class ZeroCopyTree {
         return list;
     }
 
+    /**
+     * 在目录内通过二分查找定位子节点
+     *
+     * 利用子节点按字典序排列的铁律，实现 O(log N) 的局部查找。
+     *
+     * @param dirNodeIndex 目录节点索引
+     * @param targetName 要查找的局部文件名
+     * @returns 找到的子节点索引，未找到返回 null
+     */
     public findChildInPlace(dirNodeIndex: number, targetName: string): number | null {
-        const childStart = this.treeData.getUint32(dirNodeIndex * 32 + 12, true);
-        const childCount = this.treeData.getUint32(dirNodeIndex * 32 + 16, true);
+        const offset = dirNodeIndex * 32;
+        const isDir = (this.treeData.getUint16(offset + 6, true) & 1) === 1;
+        if (!isDir) return null;
 
-        let left = 0;
-        let right = childCount - 1;
+        const childStart = this.treeData.getUint32(offset + 12, true);
+        const childCount = this.treeData.getUint32(offset + 16, true);
 
-        while (left <= right) {
-            const mid = (left + right) >> 1;
-            const midIndex = childStart + mid;
-            const midName = this.readLocalName(midIndex);
-
-            if (midName === targetName) return midIndex;
-            if (midName < targetName) left = mid + 1;
-            else right = mid - 1;
+        // 二分查找：子节点按字典序排列
+        let lo = 0, hi = childCount - 1;
+        while (lo <= hi) {
+            const mid = (lo + hi) >>> 1;
+            const midName = this.readLocalName(childStart + mid);
+            const cmp = midName.localeCompare(targetName);
+            if (cmp === 0) return childStart + mid;
+            if (cmp < 0) lo = mid + 1;
+            else hi = mid - 1;
         }
         return null;
     }
 
+    /**
+     * 从零拷贝视图中提取完整的 JavaScript 嵌套对象树
+     *
+     * 递归遍历 Tree Node Array，生成常规 JS 对象树（JsFileNode）。
+     * 适用于需要完整树结构的场景（如 UI 文件浏览器）。
+     *
+     * @param nodeIndex 起始节点索引（默认 0 = 根目录）
+     */
     public buildJsObjectTree(nodeIndex: number = 0): JsFileNode {
         const offset = nodeIndex * 32;
         const flags = this.treeData.getUint16(offset + 6, true);
@@ -92,10 +183,12 @@ export class ZeroCopyTree {
             isFile: !isDir
         };
 
+        // target_index / target_size 的含义取决于节点类型
         const targetIndex = this.treeData.getUint32(offset + 12, true);
         const targetSize = this.treeData.getUint32(offset + 16, true);
 
         if (isDir) {
+            // 目录: targetIndex = 子节点起始下标, targetSize = 子节点数量
             node.children = {};
             for (let i = 0; i < targetSize; i++) {
                 const childNodeIndex = targetIndex + i;
@@ -103,6 +196,7 @@ export class ZeroCopyTree {
                 node.children[childObj.name] = childObj;
             }
         } else {
+            // 文件: targetIndex = Local Header 块编号, targetSize = 真实字节长度
             node.blockIndex = targetIndex;
             node.size = targetSize;
         }
@@ -111,6 +205,17 @@ export class ZeroCopyTree {
     }
 }
 
+/**
+ * ModPackerV2 — V2 封包文件打包器
+ *
+ * 负责将一组文件打包为符合 JML V2 规范的二进制封包。
+ * 打包流程概要：
+ *   1. 路径标准化（UNIX 风格正斜杠，无前导/后置斜杠）
+ *   2. 构建拍平的树状节点数组（BFS 层序遍历，子节点字典序排列）
+ *   3. 构建完美哈希索引（自动调整 HashSeed 直到无冲突）
+ *   4. 生成文件流区（Local Header + File Data 交替，全部 64B 对齐）
+ *   5. 组装全局头、偏移表和所有区块
+ */
 export class ModPackerV2 {
     private encoder = new TextEncoder();
     private xxhashApi: any;
@@ -124,24 +229,39 @@ export class ModPackerV2 {
         return new ModPackerV2(api);
     }
 
+    /**
+     * 路径标准化：反斜杠转正斜杠，去除前导/后置斜杠
+     * 例如: "\\a\\b\\c\\" → "a/b/c"
+     */
     private normalizePath(path: string): string {
         return path.replace(/\\/g, '/').replace(/^\/+|\/+$/g, '');
     }
 
+    /**
+     * 将文件集合打包为 V2 封包格式的二进制数据
+     *
+     * @param files     文件路径 → 文件内容的映射
+     * @param modMetaJson  ModMeta JSON 字符串（算法参数/Nonce 等元数据）
+     * @param bootJson     boot.json 引导信息 JSON 字符串
+     * @param options      可选参数，hashSeed 可指定初始哈希种子
+     * @returns 打包后的完整二进制数据
+     */
     public async pack(
         files: Map<string, Uint8Array>,
         modMetaJson: string,
         bootJson: string,
         options: { hashSeed?: number } = {}
     ): Promise<Uint8Array> {
+        // ── 第一步：路径标准化，确保 boot.json 使用传入的 bootJson 参数 ──
         const normalizedFiles = new Map<string, Uint8Array>();
         for (const [path, data] of files) {
             const norm = this.normalizePath(path);
-            if (norm === "boot.json") continue;
+            if (norm === "boot.json") continue; // 跳过文件集合中的 boot.json，使用参数传入的
             normalizedFiles.set(norm, data);
         }
         normalizedFiles.set("boot.json", this.encoder.encode(bootJson));
 
+        // ── 第二步：构建内存中的目录树 ──
         const sortedPaths = Array.from(normalizedFiles.keys()).sort();
         const root: any = { name: "", children: new Map(), isFile: false };
         for (const path of sortedPaths) {
@@ -160,6 +280,8 @@ export class ModPackerV2 {
             }
         }
 
+        // ── 第三步：BFS 层序遍历，构建拍平的 Tree Node Array ──
+        // 保证铁律：同一目录的子节点物理连续 + 字典序排列
         const treeNodes: any[] = [];
         const stringPoolParts: Uint8Array[] = [];
         let currentStringOffset = 0;
@@ -170,6 +292,7 @@ export class ModPackerV2 {
             node.index = nodeIdx;
             node.parent = parent;
 
+            // 将局部名写入 String Pool
             const nameBuf = this.encoder.encode(node.name);
             node.nameOffset = currentStringOffset;
             node.nameLength = nameBuf.length;
@@ -177,20 +300,23 @@ export class ModPackerV2 {
             currentStringOffset += nameBuf.length;
 
             if (!node.isFile) {
+                // 子节点按字典序排列（铁律 #2）
                 const sortedChildren = Array.from(node.children.values())
                     .sort((a: any, b: any) => a.name.localeCompare(b.name));
-                node.childStart = 0;
+                node.childStart = 0; // 占位，BFS 中会重新赋值
                 node.childCount = sortedChildren.length;
                 node.sortedChildren = sortedChildren;
             }
         };
 
+        // BFS 遍历确保同一目录的子节点在数组中物理连续（铁律 #1）
         const queue: {node: any, parent: any}[] = [{node: root, parent: null}];
         let head = 0;
         while(head < queue.length) {
             const {node, parent} = queue[head++];
             processNode(node, parent);
             if (!node.isFile) {
+                // childStart = 子节点在 Tree Node Array 中的起始下标
                 node.childStart = queue.length;
                 for (const child of node.sortedChildren) {
                     queue.push({node: child, parent: node});
@@ -198,17 +324,22 @@ export class ModPackerV2 {
             }
         }
 
+        // String Pool：局部名首尾相连，不使用 \0 结尾，依靠 offset+length 切片读取
         const stringPoolBuffer = this.concatUint8Arrays(stringPoolParts);
         const stringPoolPadded = this.padToBlockSize(new Uint8Array(stringPoolBuffer));
 
+        // 各元数据区块对齐到 64 字节边界
         const modMetaBuf = this.padToBlockSize(this.encoder.encode(modMetaJson));
         const bootJsonBuf = this.padToBlockSize(this.encoder.encode(bootJson));
         const treeNodeArraySize = this.alignTo64(treeNodes.length * 32);
 
+        // ── 第四步：构建完美哈希索引 ──
+        // 自动调整 HashSeed 直到所有文件路径的 xxHash64 无冲突
         let hashSeed = options.hashSeed || Math.floor(Math.random() * 0xFFFFFFFF);
         const entryCount = this.alignTo64(sortedPaths.length * 16) / 16;
         let finalHashIndex = new Uint8Array(entryCount * 16);
 
+        // 尝试构建无冲突的哈希表，若有冲突则递增 seed 重试
         while (true) {
             const slots = new Array(entryCount).fill(null);
             let collision = false;
@@ -226,10 +357,14 @@ export class ModPackerV2 {
             hashSeed = (hashSeed + 1) >>> 0;
         }
 
+        // ── 第五步：计算文件流区的起始偏移 ──
+        // baseOffset = Global Header + Block Offset Table + ModMeta + BootJson
+        //            + Hash Index + Tree Node Array + String Pool
         const baseOffset = GLOBAL_HEADER_SIZE + BLOCK_OFFSET_TABLE_SIZE +
                            modMetaBuf.length + bootJsonBuf.length +
                            finalHashIndex.length + treeNodeArraySize + stringPoolPadded.length;
 
+        // ── 第六步：构建文件流区（Local Header + File Data 交替排列）──
         let currentAbsoluteOffset = baseOffset;
         const fileStreamChunks: Uint8Array[] = [];
         const fileEntries: { path: string, blockIndex: number, size: number }[] = [];
@@ -237,12 +372,21 @@ export class ModPackerV2 {
         for (const path of sortedPaths) {
             const data = normalizedFiles.get(path)!;
             const pathBuf = this.encoder.encode(path);
+            // Local Header 大小 = 12 字节固定头 + 路径长度，对齐到 64 字节
             const localHeaderSize = this.alignTo64(12 + pathBuf.length);
 
-            // Block Index IS byteOffset / 64
+            // Block Index = 绝对字节偏移 / 64（块编号）
+            // 可直接用作 XChaCha20 解密时的初始 Counter
             const blockIndex = currentAbsoluteOffset / BlockSize;
             fileEntries.push({ path, blockIndex, size: data.length });
 
+            // 构建 Local Header:
+            //   [0..3]  magic "FILE" (4 bytes)
+            //   [4..5]  name_length  (uint16)
+            //   [6..9]  real_length  (uint32) — 文件原始数据真实长度
+            //   [10..11] flags       (uint16) — 保留
+            //   [12..]  full_path    (UTF-8, 含斜杠的完整路径，用于二进制审查与验证)
+            //   尾部 0x00 填充至 64 字节边界
             const lh = new Uint8Array(localHeaderSize);
             lh.set(LocalHeaderMagic);
             const lhView = new DataView(lh.buffer);
@@ -251,6 +395,7 @@ export class ModPackerV2 {
             lh.set(pathBuf, 12);
             fileStreamChunks.push(lh);
 
+            // File Data：严格从 64 字节边界起算，尾部 0x00 填充到下一个 64 字节边界
             fileStreamChunks.push(data);
             const dataPadding = (BlockSize - (data.length % BlockSize)) % BlockSize;
             if (dataPadding > 0) fileStreamChunks.push(new Uint8Array(dataPadding));
@@ -259,37 +404,49 @@ export class ModPackerV2 {
 
         const fileStreamBuffer = this.concatUint8Arrays(fileStreamChunks);
 
+        // ── 第七步：填充 Hash Index Array ──
+        // 每个条目 16 字节: hash_value(uint64) + block_index(uint32) + flags(uint32)
         const hashIndexView = new DataView(finalHashIndex.buffer);
         for (const entry of fileEntries) {
             const h = this.xxhashApi.h64(entry.path, BigInt(hashSeed));
             const slotIdx = Number(h % BigInt(entryCount));
             const off = slotIdx * 16;
-            hashIndexView.setBigUint64(off, h, true);
-            hashIndexView.setUint32(off + 8, entry.blockIndex, true);
+            hashIndexView.setBigUint64(off, h, true);          // hash_value
+            hashIndexView.setUint32(off + 8, entry.blockIndex, true); // block_index
         }
 
+        // ── 第八步：填充 Tree Node Array ──
+        // 每个节点 32 字节，详见 ZeroCopyTree 类注释
         const finalTreeNodeArray = new Uint8Array(treeNodes.length * 32);
         const treeNodeView = new DataView(finalTreeNodeArray.buffer);
         for (let i = 0; i < treeNodes.length; i++) {
             const node = treeNodes[i];
             const offset = i * 32;
-            treeNodeView.setUint32(offset, node.nameOffset, true);
-            treeNodeView.setUint16(offset + 4, node.nameLength, true);
-            treeNodeView.setUint16(offset + 6, node.isFile ? TreeNodeFlags.IsFile : TreeNodeFlags.IsDirectory, true);
+            treeNodeView.setUint32(offset, node.nameOffset, true);       // name_offset
+            treeNodeView.setUint16(offset + 4, node.nameLength, true);   // name_length
+            treeNodeView.setUint16(offset + 6, node.isFile ? TreeNodeFlags.IsFile : TreeNodeFlags.IsDirectory, true); // flags
             if (node.isFile) {
+                // 文件: target_index = block_index, target_size = real_length
                 const fullPath = this.getFullPath(node);
                 const entry = fileEntries.find(e => e.path === fullPath);
                 treeNodeView.setUint32(offset + 12, entry!.blockIndex, true);
                 treeNodeView.setUint32(offset + 16, entry!.size, true);
             } else {
+                // 目录: target_index = child_start, target_size = child_count
                 treeNodeView.setUint32(offset + 12, node.childStart, true);
                 treeNodeView.setUint32(offset + 16, node.childCount, true);
             }
         }
 
-        // Padded to block size
+        // Tree Node Array 也需对齐到 64 字节边界
         const finalTreeNodeArrayPadded = this.padToBlockSize(finalTreeNodeArray);
 
+        // ── 第九步：构建 Global Header (128 字节) ──
+        // 0x00~0x0F: Magic Number "JeremieModLoader"
+        // 0x10~0x13: 协议版本号
+        // 0x14~0x17: 标志位掩码
+        // 0x18~0x1B: HashSeed（完美哈希种子）
+        // 0x1C~0x7F: 预留（Nonce/Salt 等加密参数）
         const globalHeader = new Uint8Array(GLOBAL_HEADER_SIZE);
         globalHeader.set(MagicNumber);
         const ghView = new DataView(globalHeader.buffer);
@@ -297,6 +454,8 @@ export class ModPackerV2 {
         ghView.setUint32(0x14, GlobalFlags.None, true);
         ghView.setUint32(0x18, hashSeed, true);
 
+        // ── 第十步：构建 Block Offset Table (128 字节) ──
+        // 记录各区块的字节偏移和长度，供读取器快速定位
         const blockOffsetTable = new Uint8Array(BLOCK_OFFSET_TABLE_SIZE);
         const botView = new DataView(blockOffsetTable.buffer);
         const offsets: BlockOffsets = {
@@ -314,6 +473,7 @@ export class ModPackerV2 {
             fileStreamLength: fileStreamBuffer.length
         };
 
+        // 将偏移表写入二进制 (每对 offset+length 占 8 字节)
         botView.setUint32(0, offsets.modMetaOffset, true);
         botView.setUint32(4, offsets.modMetaLength, true);
         botView.setUint32(8, offsets.bootJsonOffset, true);
@@ -327,18 +487,20 @@ export class ModPackerV2 {
         botView.setUint32(40, offsets.fileStreamOffset, true);
         botView.setUint32(44, offsets.fileStreamLength, true);
 
+        // ── 最终组装：按顺序拼接所有区块 ──
         return this.concatUint8Arrays([
-            globalHeader,
-            blockOffsetTable,
-            modMetaBuf,
-            bootJsonBuf,
-            finalHashIndex,
-            finalTreeNodeArrayPadded,
-            stringPoolPadded,
-            fileStreamBuffer
+            globalHeader,          // 128B — 全局文件头
+            blockOffsetTable,      // 128B — 主区块偏移表
+            modMetaBuf,            // 64B 对齐 — 文件元数据信息区
+            bootJsonBuf,           // 64B 对齐 — bootJson 引导信息区
+            finalHashIndex,        // 64B 对齐 — Hash Index Array（O(1) 定位）
+            finalTreeNodeArrayPadded, // 64B 对齐 — Tree Node Array（目录遍历）
+            stringPoolPadded,      // 64B 对齐 — String Pool（局部文件名）
+            fileStreamBuffer       // 64B 对齐 — 文件流区（Local Header + File Data）
         ]);
     }
 
+    /** 拼接多个 Uint8Array 为单个连续数组 */
     private concatUint8Arrays(arrays: Uint8Array[]): Uint8Array {
         const totalLength = arrays.reduce((acc, arr) => acc + arr.length, 0);
         const result = new Uint8Array(totalLength);
@@ -350,6 +512,7 @@ export class ModPackerV2 {
         return result;
     }
 
+    /** 从叶子节点向上回溯，拼接出完整的文件路径 */
     private getFullPath(node: any): string {
         const parts = [];
         let curr = node;
@@ -360,10 +523,12 @@ export class ModPackerV2 {
         return parts.join('/');
     }
 
+    /** 将大小向上对齐到 64 字节边界 */
     private alignTo64(size: number): number {
         return Math.ceil(size / 64) * 64;
     }
 
+    /** 将数据填充到 64 字节对齐（尾部补 0x00） */
     private padToBlockSize(data: Uint8Array): Uint8Array {
         const target = this.alignTo64(data.length);
         if (target === data.length) return data;
@@ -373,12 +538,27 @@ export class ModPackerV2 {
     }
 }
 
+/**
+ * ModReaderV2 — V2 封包文件读取器
+ *
+ * 从二进制缓冲区中解析 JML V2 封包，提供：
+ *   - getModMetaJson() / getBootJson() — 读取明文元数据
+ *   - getTree() — 获取零拷贝目录树视图
+ *   - findFile(path) — O(1) 全路径哈希定位文件
+ *   - readFile(blockIdx) — 根据块编号读取文件数据
+ *
+ * 读取验证闭环（安全兜底）:
+ *   1. 通过 xxHash64 查出 Block Index
+ *   2. 跳转至该块读取 Local Header
+ *   3. 强制验证 Local Header 中的明文路径与请求路径一致
+ *   4. 验证通过后方可读取 File Data
+ */
 export class ModReaderV2 {
     private buffer: Uint8Array;
     private view: DataView;
     private offsets: BlockOffsets;
-    private hashSeed: number;
-    private tree: ZeroCopyTree;
+    private hashSeed: number;   // 从 Global Header 读取的完美哈希种子
+    private tree: ZeroCopyTree; // 零拷贝目录树视图
     private xxhashApi: any;
     private decoder = new TextDecoder();
 
@@ -387,11 +567,15 @@ export class ModReaderV2 {
         this.view = new DataView(buffer.buffer, buffer.byteOffset, buffer.length);
         this.xxhashApi = xxhashApi;
 
+        // 验证 Magic Number "JeremieModLoader"
         for (let i = 0; i < MagicNumber.length; i++) {
             if (this.view.getUint8(i) !== MagicNumber[i]) throw new Error("Invalid Magic Number");
         }
 
+        // 从 Global Header 中读取 HashSeed (0x18~0x1B)
         this.hashSeed = this.view.getUint32(0x18, true);
+
+        // 从 Block Offset Table 中读取各区块的偏移与长度
         const botOff = GLOBAL_HEADER_SIZE;
         this.offsets = {
             modMetaOffset: this.view.getUint32(botOff, true),
@@ -408,6 +592,7 @@ export class ModReaderV2 {
             fileStreamLength: this.view.getUint32(botOff + 44, true),
         };
 
+        // 构建零拷贝目录树视图（直接引用缓冲区子视图，无拷贝）
         this.tree = new ZeroCopyTree(
             this.buffer.subarray(this.offsets.treeNodeOffset, this.offsets.treeNodeOffset + this.offsets.treeNodeLength),
             this.buffer.subarray(this.offsets.stringPoolOffset, this.offsets.stringPoolOffset + this.offsets.stringPoolLength)
@@ -419,26 +604,42 @@ export class ModReaderV2 {
         return new ModReaderV2(buffer, api);
     }
 
+    /** 路径标准化：反斜杠转正斜杠，去除前导/后置斜杠 */
     private normalizePath(path: string): string {
         return path.replace(/\\/g, '/').replace(/^\/+|\/+$/g, '');
     }
 
+    /** 读取 ModMeta JSON（明文，去除尾部 0x00 填充） */
     public getModMetaJson(): string {
         const data = this.buffer.subarray(this.offsets.modMetaOffset, this.offsets.modMetaOffset + this.offsets.modMetaLength);
         let end = data.indexOf(0);
         return this.decoder.decode(end === -1 ? data : data.subarray(0, end));
     }
 
+    /** 读取 boot.json 引导信息（明文，去除尾部 0x00 填充） */
     public getBootJson(): string {
         const data = this.buffer.subarray(this.offsets.bootJsonOffset, this.offsets.bootJsonOffset + this.offsets.bootJsonLength);
         let end = data.indexOf(0);
         return this.decoder.decode(end === -1 ? data : data.subarray(0, end));
     }
 
+    /** 获取零拷贝目录树视图 */
     public getTree(): ZeroCopyTree {
         return this.tree;
     }
 
+    /**
+     * O(1) 全路径哈希定位文件
+     *
+     * 流程：
+     *   1. 对路径计算 xxHash64(path, HashSeed)
+     *   2. 取模定位 Hash Index Array 中的槽位
+     *   3. 比较哈希值是否匹配
+     *   4. 跳转至 Local Header 验证明文路径（安全兜底，防止哈希碰撞）
+     *
+     * @param path 文件的完整路径（如 "textures/ui/icon.png"）
+     * @returns 文件对应的 Block Index，未找到返回 null
+     */
     public findFile(path: string): number | null {
         const normPath = this.normalizePath(path);
         const h = this.xxhashApi.h64(normPath, BigInt(this.hashSeed));
@@ -448,41 +649,74 @@ export class ModReaderV2 {
         const hashIdxBase = this.offsets.hashIndexOffset;
         const idx = Number(h % BigInt(entryCount));
         const entryOffset = hashIdxBase + idx * 16;
+        // 读取 Hash Index 条目中的哈希值 (uint64)
         const entryHash = this.view.getBigUint64(entryOffset, true);
 
         if (entryHash === h) {
+            // 哈希匹配，读取 block_index 并执行路径验证
             const blockIdx = this.view.getUint32(entryOffset + 8, true);
             if (this.verifyFile(blockIdx, normPath)) return blockIdx;
         }
         return null;
     }
 
+    /**
+     * 验证 Local Header 中的明文路径是否与期望路径一致
+     * 防止"幽灵文件查寻碰撞"的安全兜底机制
+     */
     private verifyFile(blockIdx: number, expectedPath: string): boolean {
         const offset = blockIdx * BlockSize;
         if (offset + 12 > this.buffer.length) return false;
+        // 检查 Local Header 的 magic "FILE" (0x46 0x49 0x4C 0x45)
         if (this.buffer[offset] !== 0x46 || this.buffer[offset+1] !== 0x49 ||
             this.buffer[offset+2] !== 0x4C || this.buffer[offset+3] !== 0x45) return false;
 
+        // 读取 name_length 并比较完整路径
         const nameLen = this.view.getUint16(offset + 4, true);
         const path = this.decoder.decode(this.buffer.subarray(offset + 12, offset + 12 + nameLen));
         return this.normalizePath(path) === expectedPath;
     }
 
+    /**
+     * 根据 Block Index 读取文件数据
+     *
+     * 从 Local Header 中解析路径长度和真实数据长度，
+     * 然后跳过 Local Header（对齐到 64 字节边界）读取 File Data。
+     *
+     * @param blockIdx 文件对应的 Local Header 块编号（由 findFile 或 Tree 获得）
+     * @returns 文件原始数据的 Uint8Array 子视图（零拷贝）
+     */
     public readFile(blockIdx: number): Uint8Array {
         const offset = blockIdx * BlockSize;
         const nameLen = this.view.getUint16(offset + 4, true);
         const realLen = this.view.getUint32(offset + 6, true);
+        // File Data 起始位置 = Local Header 起始 + 对齐后的头部大小
         const dataStart = offset + this.alignTo64(12 + nameLen);
         if (dataStart + realLen > this.buffer.length) throw new Error(`Read out of bounds`);
         return this.buffer.subarray(dataStart, dataStart + realLen);
     }
 
+    /** 将大小向上对齐到 64 字节边界 */
     private alignTo64(size: number): number {
         return Math.ceil(size / 64) * 64;
     }
 }
 
+/**
+ * ModConverterV2 — V2 封包与 ZIP 格式的双向转换器
+ *
+ * 提供 ZIP → ModPack V2 和 ModPack V2 → ZIP 两个方向的转换，
+ * 方便与现有基于 ZIP 的 Mod 生态互操作。
+ */
 export class ModConverterV2 {
+    /**
+     * 从 ZIP 文件创建 V2 封包
+     *
+     * @param zipData      ZIP 文件的二进制数据
+     * @param modMetaJson  ModMeta JSON 字符串
+     * @param bootJson     boot.json 引导信息
+     * @returns V2 封包的二进制数据
+     */
     public static async fromZip(zipData: Uint8Array, modMetaJson: string, bootJson: string): Promise<Uint8Array> {
         const zip = await JSZip.loadAsync(zipData);
         const files = new Map<string, Uint8Array>();
@@ -499,11 +733,22 @@ export class ModConverterV2 {
         return await packer.pack(files, modMetaJson, bootJson);
     }
 
+    /**
+     * 将 V2 封包转换回 ZIP 格式
+     *
+     * 通过 ModReaderV2 解析封包，遍历目录树提取所有文件，
+     * 重新打包为标准 ZIP 格式。
+     *
+     * @param modPackData V2 封包的二进制数据
+     * @returns ZIP 文件的二进制数据
+     */
     public static async toZip(modPackData: Uint8Array): Promise<Uint8Array> {
         const reader = await ModReaderV2.create(modPackData);
         const zip = new JSZip();
         const tree = reader.getTree();
         const root = tree.buildJsObjectTree();
+
+        // 递归遍历目录树，将所有文件添加到 ZIP
         const addNodeToZip = (node: JsFileNode, currentPath: string) => {
             const nodePath = currentPath ? `${currentPath}/${node.name}` : node.name;
             if (node.isFile) {
@@ -515,6 +760,7 @@ export class ModConverterV2 {
         if (root.children) {
             for (const childName in root.children) addNodeToZip(root.children[childName], "");
         }
+        // 单独写入 boot.json（从元数据区读取，非文件流区）
         zip.file("boot.json", reader.getBootJson());
         return await zip.generateAsync({ type: "uint8array" });
     }
