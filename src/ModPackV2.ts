@@ -40,10 +40,35 @@ import {
     LocalHeaderMagic,
     MagicNumber,
     ModMetaProtocolVersion,
-    TreeNodeFlags
+    TreeNodeFlags, crypto_stream_chacha20_KEYBYTES, crypto_pwhash_SALTBYTES, crypto_stream_chacha20_NONCEBYTES
 } from "./ModMetaV2";
-import xxhash from "xxhash-wasm";
+import xxhash, {XXHashAPI} from "xxhash-wasm";
 import JSZip from "jszip";
+
+import argon2 from 'argon2-browser';
+import {xchacha20} from '@noble/ciphers/chacha.js';
+import {randombytes_buf} from "./randombytes_buf";
+
+// Local Header flags
+const LH_FLAG_ENCRYPTED = 1;
+
+// Random bytes helper (browser-friendly)
+function getRandomBytes(length: number): Uint8Array {
+    // if (typeof globalThis !== 'undefined' && (globalThis as any).crypto && (globalThis as any).crypto.getRandomValues) {
+    //     const arr = new Uint8Array(length);
+    //     (globalThis as any).crypto.getRandomValues(arr);
+    //     return arr;
+    // }
+    // // Fallback to Node.js if available
+    // try {
+    //     // eslint-disable-next-line @typescript-eslint/no-var-requires
+    //     const nodeCrypto = require('crypto');
+    //     return new Uint8Array(nodeCrypto.randomBytes(length));
+    // } catch {
+    //     throw new Error('No secure random generator available');
+    // }
+    return randombytes_buf(length, 'uint8array');
+}
 
 /**
  * JsFileNode — 表示 JS 内存中的文件/目录树节点
@@ -218,9 +243,9 @@ export class ZeroCopyTree {
  */
 export class ModPackerV2 {
     private encoder = new TextEncoder();
-    private xxhashApi: any;
+    private xxhashApi: XXHashAPI;
 
-    constructor(xxhashApi: any) {
+    constructor(xxhashApi: XXHashAPI) {
         this.xxhashApi = xxhashApi;
     }
 
@@ -250,7 +275,7 @@ export class ModPackerV2 {
         files: Map<string, Uint8Array>,
         modMetaJson: string,
         bootJson: string,
-        options: { hashSeed?: number } = {}
+        options: { hashSeed?: number, password?: string } = {}
     ): Promise<Uint8Array> {
         // ── 第一步：路径标准化，确保 boot.json 使用传入的 bootJson 参数 ──
         const normalizedFiles = new Map<string, Uint8Array>();
@@ -260,6 +285,26 @@ export class ModPackerV2 {
             normalizedFiles.set(norm, data);
         }
         normalizedFiles.set("boot.json", this.encoder.encode(bootJson));
+
+        // ── 加密参数准备（若提供了密码，则对文件体启用 XChaCha20 原地加密）──
+        const hasEncrypted = !!options.password;
+        const nonce = hasEncrypted ? getRandomBytes(crypto_stream_chacha20_NONCEBYTES) : new Uint8Array(crypto_stream_chacha20_NONCEBYTES);
+        const salt = hasEncrypted ? getRandomBytes(crypto_pwhash_SALTBYTES) : new Uint8Array(crypto_pwhash_SALTBYTES);
+        let key: Uint8Array | null = null;
+        if (hasEncrypted && options.password) {
+            const kdf = await argon2.hash({
+                pass: options.password,
+                salt,
+                // time: 3,
+                // mem: 1 << 16, // 64 MiB
+                // parallelism: 1,
+                hashLen: crypto_stream_chacha20_KEYBYTES,
+                // type: (argon2 as any).ArgonType?.Argon2id ?? 2, // prefer Argon2id
+            } as any);
+            // argon2-browser returns { hash: ArrayBuffer | Uint8Array }
+            const hashBuf: ArrayBuffer | Uint8Array = (kdf as any).hash;
+            key = hashBuf instanceof Uint8Array ? hashBuf : new Uint8Array(hashBuf);
+        }
 
         // ── 第二步：构建内存中的目录树 ──
         const sortedPaths = Array.from(normalizedFiles.keys()).sort();
@@ -374,34 +419,44 @@ export class ModPackerV2 {
         for (const path of sortedPaths) {
             const data = normalizedFiles.get(path)!;
             const pathBuf = this.encoder.encode(path);
-            // Local Header 大小 = 12 字节固定头 + 路径长度，对齐到 64 字节
-            const localHeaderSize = this.alignTo64(12 + pathBuf.length);
+            // Local Header 大小 = 20 字节固定头(含8字节xxhash) + 路径长度，对齐到 64 字节
+            const localHeaderSize = this.alignTo64(20 + pathBuf.length);
 
             // Block Index = 绝对字节偏移 / 64（块编号）
             // 可直接用作 XChaCha20 解密时的初始 Counter
             const blockIndex = currentAbsoluteOffset / BlockSize;
             fileEntries.push({path, blockIndex, size: data.length});
 
+            // 计算明文 xxHash64（用于完整性校验）
+            const fileHash = this.xxhashApi.h64Raw(data, BigInt(0));
+
             // 构建 Local Header:
             //   [0..3]  magic "FILE" (4 bytes)
             //   [4..5]  name_length  (uint16)
             //   [6..9]  real_length  (uint32) — 文件原始数据真实长度
-            //   [10..11] flags       (uint16) — 保留
-            //   [12..]  full_path    (UTF-8, 含斜杠的完整路径，用于二进制审查与验证)
+            //   [10..11] flags       (uint16) — bit0=加密
+            //   [12..(12+nameLen-1)] full_path (UTF-8, 含斜杠完整路径)
+            //   [(12+nameLen)..(19+nameLen)] xxhash64 (uint64, 明文数据)
             //   尾部 0x00 填充至 64 字节边界
             const lh = new Uint8Array(localHeaderSize);
             lh.set(LocalHeaderMagic);
             const lhView = new DataView(lh.buffer);
             lhView.setUint16(4, pathBuf.length, true);
             lhView.setUint32(6, data.length, true);
+            lhView.setUint16(10, hasEncrypted ? LH_FLAG_ENCRYPTED : 0, true);
             lh.set(pathBuf, 12);
+            lhView.setBigUint64(12 + pathBuf.length, fileHash, true);
             fileStreamChunks.push(lh);
 
             // File Data：严格从 64 字节边界起算，尾部 0x00 填充到下一个 64 字节边界
-            fileStreamChunks.push(data);
-            const dataPadding = (BlockSize - (data.length % BlockSize)) % BlockSize;
+            let outData = data;
+            if (hasEncrypted && key) {
+                outData = xchacha20(key, nonce, data, undefined, blockIndex);
+            }
+            fileStreamChunks.push(outData);
+            const dataPadding = (BlockSize - (outData.length % BlockSize)) % BlockSize;
             if (dataPadding > 0) fileStreamChunks.push(new Uint8Array(dataPadding));
-            currentAbsoluteOffset += localHeaderSize + data.length + dataPadding;
+            currentAbsoluteOffset += localHeaderSize + outData.length + dataPadding;
         }
 
         const fileStreamBuffer = this.concatUint8Arrays(fileStreamChunks);
@@ -453,8 +508,14 @@ export class ModPackerV2 {
         globalHeader.set(MagicNumber);
         const ghView = new DataView(globalHeader.buffer);
         ghView.setUint32(0x10, ModMetaProtocolVersion, true);
-        ghView.setUint32(0x14, GlobalFlags.None, true);
+        let gFlags = GlobalFlags.None;
+        if (hasEncrypted) gFlags |= GlobalFlags.HasEncryptedFiles;
+        ghView.setUint32(0x14, gFlags, true);
         ghView.setUint32(0x18, hashSeed, true);
+        if (hasEncrypted) {
+            globalHeader.set(nonce, 0x1C);
+            globalHeader.set(salt, 0x34);
+        }
 
         // ── 第十步：构建 Block Offset Table (128 字节) ──
         // 记录各区块的字节偏移和长度，供读取器快速定位
@@ -562,10 +623,14 @@ export class ModReaderV2 {
     private offsets: BlockOffsets;
     private hashSeed: number;   // 从 Global Header 读取的完美哈希种子
     private tree: ZeroCopyTree; // 零拷贝目录树视图
-    private xxhashApi: any;
+    private xxhashApi: XXHashAPI;
     private decoder = new TextDecoder();
 
-    constructor(buffer: Uint8Array, xxhashApi: any) {
+    private _nonce: Uint8Array;
+    private _key?: Uint8Array;
+    private _hasEncrypted: boolean;
+
+    constructor(buffer: Uint8Array, xxhashApi: XXHashAPI, options?: { password?: string }) {
         this.buffer = buffer;
         this.view = new DataView(buffer.buffer, buffer.byteOffset, buffer.length);
         this.xxhashApi = xxhashApi;
@@ -577,6 +642,20 @@ export class ModReaderV2 {
 
         // 从 Global Header 中读取 HashSeed (0x18~0x1B)
         this.hashSeed = this.view.getUint32(0x18, true);
+        const globalFlags = this.view.getUint32(0x14, true);
+        const hasEncrypted = (globalFlags & GlobalFlags.HasEncryptedFiles) !== 0;
+        // 读取 Nonce 与 Salt（若存在）
+        const nonce = new Uint8Array(crypto_stream_chacha20_NONCEBYTES);
+        const salt = new Uint8Array(crypto_pwhash_SALTBYTES);
+        nonce.set(this.buffer.subarray(0x1C, 0x1C + crypto_stream_chacha20_NONCEBYTES));
+        salt.set(this.buffer.subarray(0x34, 0x34 + crypto_pwhash_SALTBYTES));
+        this._nonce = nonce;
+        this._hasEncrypted = hasEncrypted;
+        this._key = undefined;
+        if (hasEncrypted && options?.password) {
+            // 同打包端一致的 KDF 参数
+            // 注意：argon2-browser 为异步 API，Reader 构造函数为同步，这里将密钥推迟到 create()
+        }
 
         // 从 Block Offset Table 中读取各区块的偏移与长度
         const botOff = GLOBAL_HEADER_SIZE;
@@ -602,9 +681,26 @@ export class ModReaderV2 {
         );
     }
 
-    public static async create(buffer: Uint8Array): Promise<ModReaderV2> {
+    public static async create(buffer: Uint8Array, options?: { password?: string }): Promise<ModReaderV2> {
         const api = await xxhash();
-        return new ModReaderV2(buffer, api);
+        const reader = new ModReaderV2(buffer, api, options);
+        const hasEncrypted = (reader.view.getUint32(0x14, true) & GlobalFlags.HasEncryptedFiles) !== 0;
+        if (hasEncrypted) {
+            if (!options?.password) throw new Error('Encrypted pack requires password');
+            const salt = reader.buffer.subarray(0x34, 0x34 + crypto_pwhash_SALTBYTES);
+            const kdf = await argon2.hash({
+                pass: options.password,
+                salt,
+                // time: 3,
+                // mem: 1 << 16, // 64 MiB
+                // parallelism: 1,
+                hashLen: crypto_stream_chacha20_KEYBYTES,
+                // type: (argon2 as any).ArgonType?.Argon2id ?? 2, // prefer Argon2id
+            } as any);
+            const hashBuf: ArrayBuffer | Uint8Array = (kdf as any).hash;
+            (reader as any)._key = hashBuf instanceof Uint8Array ? hashBuf : new Uint8Array(hashBuf);
+        }
+        return reader;
     }
 
     /** 路径标准化：反斜杠转正斜杠，去除前导/后置斜杠 */
@@ -691,10 +787,25 @@ export class ModReaderV2 {
         const offset = blockIdx * BlockSize;
         const nameLen = this.view.getUint16(offset + 4, true);
         const realLen = this.view.getUint32(offset + 6, true);
-        // File Data 起始位置 = Local Header 起始 + 对齐后的头部大小
-        const dataStart = offset + this.alignTo64(12 + nameLen);
+        const flags = this.view.getUint16(offset + 10, true);
+        const hashOffset = offset + 12 + nameLen;
+        const storedHash = this.view.getBigUint64(hashOffset, true);
+        // File Data 起始位置 = Local Header 起始 + 对齐后的头部大小（20 + nameLen）
+        const dataStart = offset + this.alignTo64(20 + nameLen);
         if (dataStart + realLen > this.buffer.length) throw new Error(`Read out of bounds`);
-        return this.buffer.subarray(dataStart, dataStart + realLen);
+        const slice = this.buffer.subarray(dataStart, dataStart + realLen);
+
+        let plain = slice;
+        const hasEncrypted = (this.view.getUint32(0x14, true) & GlobalFlags.HasEncryptedFiles) !== 0;
+        if ((flags & LH_FLAG_ENCRYPTED) && hasEncrypted) {
+            const key: Uint8Array | undefined = this._key;
+            if (!key) throw new Error('Password not provided for encrypted pack');
+            const nonce: Uint8Array = this._nonce;
+            plain = xchacha20(key, nonce, slice, undefined, blockIdx);
+        }
+        const calcHash = this.xxhashApi.h64Raw(plain, BigInt(0));
+        if (calcHash !== storedHash) throw new Error('File integrity check failed (xxHash64 mismatch)');
+        return plain;
     }
 
     /** 将大小向上对齐到 64 字节边界 */
