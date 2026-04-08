@@ -1,6 +1,7 @@
-import { ModPackerV2, ModReaderV2, ModConverterV2 } from "../src/ModPackV2";
+import {ModPackerV2, ModReaderV2, ModConverterV2} from "../src/ModPackV2";
 import xxhash from "xxhash-wasm";
 import JSZip from "jszip";
+import fs from 'fs';
 
 async function test() {
     const api = await xxhash();
@@ -11,8 +12,8 @@ async function test() {
     files.set("sub/b.txt", new TextEncoder().encode("Hello B"));
     files.set("sub/inner/c.txt", new TextEncoder().encode("Hello C"));
 
-    const modMeta = JSON.stringify({ name: "Test Mod", version: "1.0.0" });
-    const bootJson = JSON.stringify({ entry: "a.txt" });
+    const modMeta = JSON.stringify({name: "Test Mod", version: "1.0.0"});
+    const bootJson = JSON.stringify({entry: "a.txt"});
 
     console.log("Packing...");
     const packed = await packer.pack(files, modMeta, bootJson);
@@ -20,7 +21,7 @@ async function test() {
 
     console.log("Reading...");
     const reader = new ModReaderV2(packed, api);
-    
+
     const blockIdxA = reader.findFile("a.txt");
     if (blockIdxA === null) throw new Error("a.txt not found");
     const contentA = new TextDecoder().decode(reader.readFile(blockIdxA));
@@ -47,7 +48,7 @@ async function test() {
     console.log("Testing Converter (fromZip)...");
     const packedFromZip = await ModConverterV2.fromZip(zipData, modMeta, bootJson);
     const reader2 = new ModReaderV2(packedFromZip, api);
-    
+
     const blockIdxB = reader2.findFile("sub/b.txt");
     if (blockIdxB === null) {
         // Find by tree if findFile fails
@@ -62,7 +63,7 @@ async function test() {
         }
         throw new Error("sub/b.txt not found via hash index after zip conversion");
     }
-    
+
     if (new TextDecoder().decode(reader2.readFile(blockIdxB)) !== "Hello B") {
         throw new Error("b.txt content mismatch after zip conversion");
     }

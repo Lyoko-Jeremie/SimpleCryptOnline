@@ -263,7 +263,7 @@ export class ModPackerV2 {
 
         // ── 第二步：构建内存中的目录树 ──
         const sortedPaths = Array.from(normalizedFiles.keys()).sort();
-        const root: any = { name: "", children: new Map(), isFile: false };
+        const root: any = {name: "", children: new Map(), isFile: false};
         for (const path of sortedPaths) {
             const parts = path.split('/');
             let current = root;
@@ -310,9 +310,9 @@ export class ModPackerV2 {
         };
 
         // BFS 遍历确保同一目录的子节点在数组中物理连续（铁律 #1）
-        const queue: {node: any, parent: any}[] = [{node: root, parent: null}];
+        const queue: { node: any, parent: any }[] = [{node: root, parent: null}];
         let head = 0;
-        while(head < queue.length) {
+        while (head < queue.length) {
             const {node, parent} = queue[head++];
             processNode(node, parent);
             if (!node.isFile) {
@@ -351,7 +351,7 @@ export class ModPackerV2 {
                     collision = true;
                     break;
                 }
-                slots[slotIdx] = { h, path };
+                slots[slotIdx] = {h, path};
             }
             if (!collision) break;
             hashSeed = (hashSeed + 1) >>> 0;
@@ -361,8 +361,8 @@ export class ModPackerV2 {
         // baseOffset = Global Header + Block Offset Table + ModMeta + BootJson
         //            + Hash Index + Tree Node Array + String Pool
         const baseOffset = GLOBAL_HEADER_SIZE + BLOCK_OFFSET_TABLE_SIZE +
-                           modMetaBuf.length + bootJsonBuf.length +
-                           finalHashIndex.length + treeNodeArraySize + stringPoolPadded.length;
+            modMetaBuf.length + bootJsonBuf.length +
+            finalHashIndex.length + treeNodeArraySize + stringPoolPadded.length;
 
         // ── 第六步：构建文件流区（Local Header + File Data 交替排列）──
         let currentAbsoluteOffset = baseOffset;
@@ -378,7 +378,7 @@ export class ModPackerV2 {
             // Block Index = 绝对字节偏移 / 64（块编号）
             // 可直接用作 XChaCha20 解密时的初始 Counter
             const blockIndex = currentAbsoluteOffset / BlockSize;
-            fileEntries.push({ path, blockIndex, size: data.length });
+            fileEntries.push({path, blockIndex, size: data.length});
 
             // 构建 Local Header:
             //   [0..3]  magic "FILE" (4 bytes)
@@ -668,8 +668,8 @@ export class ModReaderV2 {
         const offset = blockIdx * BlockSize;
         if (offset + 12 > this.buffer.length) return false;
         // 检查 Local Header 的 magic "FILE" (0x46 0x49 0x4C 0x45)
-        if (this.buffer[offset] !== 0x46 || this.buffer[offset+1] !== 0x49 ||
-            this.buffer[offset+2] !== 0x4C || this.buffer[offset+3] !== 0x45) return false;
+        if (this.buffer[offset] !== 0x46 || this.buffer[offset + 1] !== 0x49 ||
+            this.buffer[offset + 2] !== 0x4C || this.buffer[offset + 3] !== 0x45) return false;
 
         // 读取 name_length 并比较完整路径
         const nameLen = this.view.getUint16(offset + 4, true);
@@ -762,6 +762,6 @@ export class ModConverterV2 {
         }
         // 单独写入 boot.json（从元数据区读取，非文件流区）
         zip.file("boot.json", reader.getBootJson());
-        return await zip.generateAsync({ type: "uint8array" });
+        return await zip.generateAsync({type: "uint8array"});
     }
 }
