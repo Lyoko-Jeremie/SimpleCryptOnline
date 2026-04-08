@@ -635,10 +635,19 @@ export class ModReaderV2 {
         this.view = new DataView(buffer.buffer, buffer.byteOffset, buffer.length);
         this.xxhashApi = xxhashApi;
 
+        // 0x00~0x0F: Magic Number "JeremieModLoader"
+        // 0x10~0x13: 协议版本号
+        // 0x14~0x17: 标志位掩码
+        // 0x18~0x1B: HashSeed（完美哈希种子）
+        // 0x1C~0x7F: 预留（Nonce/Salt 等加密参数）
+
         // 验证 Magic Number "JeremieModLoader"
         for (let i = 0; i < MagicNumber.length; i++) {
             if (this.view.getUint8(i) !== MagicNumber[i]) throw new Error("Invalid Magic Number");
         }
+
+        const protocolVersion = this.view.getUint32(0x10, true);
+        if (protocolVersion !== ModMetaProtocolVersion) throw new Error(`Unsupported protocol version: ${protocolVersion}`);
 
         // 从 Global Header 中读取 HashSeed (0x18~0x1B)
         this.hashSeed = this.view.getUint32(0x18, true);
