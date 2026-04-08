@@ -130,12 +130,13 @@ struct TreeNodeEntry {
 /**
  * Local Header — variable length, always starts on a 64-byte boundary.
  *
- * Fixed part (12 bytes):
- *   magic(4) + name_length(2) + real_length(4) + flags(2)
+ * Fixed part (20 bytes):
+ *   magic(4) + name_length(2) + real_length(4) + flags(2) + xxhash64(8)
  *
  * Followed by:
  *   full_path (name_length bytes, UTF-8, no leading slash, no null terminator)
- *   padding   = (64 - ((12 + name_length) % 64)) % 64  zero bytes
+ *   xxhash64  (8 bytes, uint64) - integrity verification
+ *   padding   = (64 - ((20 + name_length) % 64)) % 64  zero bytes
  *               → ensures the immediately following File Data starts on a
  *                 fresh 64-byte boundary (= a new XChaCha20 block counter).
  */
@@ -146,7 +147,8 @@ struct LocalHeader {
     FileEntryFlags flags           [[comment("bit0: 1=encrypted (XChaCha20)")]];
     char           full_path[name_length]
                                   [[comment("Full UNIX-style path, UTF-8 (e.g. \"textures/ui/icon.png\")")]];
-    u8             header_padding[(64 - ((12 + name_length) % 64)) % 64]
+    u64            xxhash64       [[comment("xxHash64 of the original (unencrypted) file payload")]];
+    u8             header_padding[(64 - ((20 + name_length) % 64)) % 64]
                                   [[comment("Zero padding — aligns File Data to the next 64-byte boundary")]];
 } [[comment("Local file header (variable length, 64-byte-boundary-aligned)")]];
 

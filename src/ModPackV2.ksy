@@ -184,8 +184,10 @@ types:
         type: str
         size: name_length
         encoding: UTF-8
+      - id: xxhash64
+        type: u8
       - id: header_padding
-        size: (64 - ((12 + name_length) % 64)) % 64
+        size: (64 - ((20 + name_length) % 64)) % 64
 
 
 
