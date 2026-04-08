@@ -329,8 +329,10 @@ export class ModPackerV2 {
         const stringPoolPadded = this.padToBlockSize(new Uint8Array(stringPoolBuffer));
 
         // 各元数据区块对齐到 64 字节边界
-        const modMetaBuf = this.padToBlockSize(this.encoder.encode(modMetaJson));
-        const bootJsonBuf = this.padToBlockSize(this.encoder.encode(bootJson));
+        const modMetaRawBuf = this.encoder.encode(modMetaJson);
+        const bootJsonRawBuf = this.encoder.encode(bootJson);
+        const modMetaBuf = this.padToBlockSize(modMetaRawBuf);
+        const bootJsonBuf = this.padToBlockSize(bootJsonRawBuf);
         const treeNodeArraySize = this.alignTo64(treeNodes.length * 32);
 
         // ── 第四步：构建完美哈希索引 ──
@@ -460,9 +462,10 @@ export class ModPackerV2 {
         const botView = new DataView(blockOffsetTable.buffer);
         const offsets: BlockOffsets = {
             modMetaOffset: GLOBAL_HEADER_SIZE + BLOCK_OFFSET_TABLE_SIZE,
-            modMetaLength: modMetaBuf.length,
+            // length 字段记录真实有效字节数；offset 仍按 64B 对齐布局推进
+            modMetaLength: modMetaRawBuf.length,
             bootJsonOffset: GLOBAL_HEADER_SIZE + BLOCK_OFFSET_TABLE_SIZE + modMetaBuf.length,
-            bootJsonLength: bootJsonBuf.length,
+            bootJsonLength: bootJsonRawBuf.length,
             hashIndexOffset: GLOBAL_HEADER_SIZE + BLOCK_OFFSET_TABLE_SIZE + modMetaBuf.length + bootJsonBuf.length,
             hashIndexLength: finalHashIndex.length,
             treeNodeOffset: GLOBAL_HEADER_SIZE + BLOCK_OFFSET_TABLE_SIZE + modMetaBuf.length + bootJsonBuf.length + finalHashIndex.length,
@@ -609,18 +612,16 @@ export class ModReaderV2 {
         return path.replace(/\\/g, '/').replace(/^\/+|\/+$/g, '');
     }
 
-    /** 读取 ModMeta JSON（明文，去除尾部 0x00 填充） */
+    /** 读取 ModMeta JSON（明文，严格按偏移表中的真实长度切片） */
     public getModMetaJson(): string {
         const data = this.buffer.subarray(this.offsets.modMetaOffset, this.offsets.modMetaOffset + this.offsets.modMetaLength);
-        let end = data.indexOf(0);
-        return this.decoder.decode(end === -1 ? data : data.subarray(0, end));
+        return this.decoder.decode(data);
     }
 
-    /** 读取 boot.json 引导信息（明文，去除尾部 0x00 填充） */
+    /** 读取 boot.json 引导信息（明文，严格按偏移表中的真实长度切片） */
     public getBootJson(): string {
         const data = this.buffer.subarray(this.offsets.bootJsonOffset, this.offsets.bootJsonOffset + this.offsets.bootJsonLength);
-        let end = data.indexOf(0);
-        return this.decoder.decode(end === -1 ? data : data.subarray(0, end));
+        return this.decoder.decode(data);
     }
 
     /** 获取零拷贝目录树视图 */

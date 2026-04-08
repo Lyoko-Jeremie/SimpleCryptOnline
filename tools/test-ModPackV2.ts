@@ -1,19 +1,20 @@
 import {ModPackerV2, ModReaderV2, ModConverterV2} from "../src/ModPackV2";
 import xxhash from "xxhash-wasm";
 import JSZip from "jszip";
-import fs from 'fs';
+import {GLOBAL_HEADER_SIZE} from "../src/ModMetaV2";
 
 async function test() {
     const api = await xxhash();
     const packer = new ModPackerV2(api);
+    const encoder = new TextEncoder();
 
     const files = new Map<string, Uint8Array>();
     files.set("a.txt", new TextEncoder().encode("Hello A"));
     files.set("sub/b.txt", new TextEncoder().encode("Hello B"));
     files.set("sub/inner/c.txt", new TextEncoder().encode("Hello C"));
 
-    const modMeta = JSON.stringify({name: "Test Mod", version: "1.0.0"});
-    const bootJson = JSON.stringify({entry: "a.txt"});
+    const modMeta = `{"name":"Test Mod","version":"1.0.0"}\u0000META_TAIL`;
+    const bootJson = `{"entry":"a.txt"}\u0000BOOT_TAIL`;
 
     console.log("Packing...");
     const packed = await packer.pack(files, modMeta, bootJson);
@@ -23,6 +24,21 @@ async function test() {
 
     console.log("Reading...");
     const reader = new ModReaderV2(packed, api);
+
+    // 验证 BlockOffsetTable 中这两个 length 是真实长度，不是 64B 对齐长度
+    const view = new DataView(packed.buffer, packed.byteOffset, packed.length);
+    const modMetaLengthInTable = view.getUint32(GLOBAL_HEADER_SIZE + 4, true);
+    const bootJsonLengthInTable = view.getUint32(GLOBAL_HEADER_SIZE + 12, true);
+    if (modMetaLengthInTable !== encoder.encode(modMeta).length) {
+        throw new Error(`modMetaLength mismatch: ${modMetaLengthInTable}`);
+    }
+    if (bootJsonLengthInTable !== encoder.encode(bootJson).length) {
+        throw new Error(`bootJsonLength mismatch: ${bootJsonLengthInTable}`);
+    }
+
+    // 读取时必须严格按 length 解码，不能用 0x00 截断
+    if (reader.getModMetaJson() !== modMeta) throw new Error("modMeta read mismatch");
+    if (reader.getBootJson() !== bootJson) throw new Error("bootJson read mismatch");
 
     const blockIdxA = reader.findFile("a.txt");
     if (blockIdxA === null) throw new Error("a.txt not found");
