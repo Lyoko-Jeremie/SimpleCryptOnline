@@ -1,6 +1,7 @@
 import {ModPackerV2, ModReaderV2, ModConverterV2} from "../src/ModPackV2";
 import xxhash from "xxhash-wasm";
 import JSZip from "jszip";
+import fs from "fs";
 import {GLOBAL_HEADER_SIZE} from "../src/ModMetaV2";
 
 async function test() {
@@ -20,7 +21,7 @@ async function test() {
     const packed = await packer.pack(files, modMeta, bootJson);
     console.log("Packed size:", packed.length);
 
-    // await fs.promises.writeFile('test-ModPackV2-packed.modpack', packed);
+    await fs.promises.writeFile('test-ModPackV2-packed.modpack', packed);
 
     console.log("Reading...");
     const reader = new ModReaderV2(packed, api);
