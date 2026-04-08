@@ -12,6 +12,14 @@ doc: |
   - Block offset table (128 bytes)
   - Variable-sized aligned sections referenced by the offset table
 
+  Length field semantics in block_offset_table:
+  - mod_meta_length / boot_json_length : REAL (unpadded) byte count of the UTF-8 payload.
+    The physical region is zero-padded to the next 64-byte boundary, but the length
+    recorded here reflects only the meaningful content bytes so readers can decode
+    without null-byte truncation, even when the payload itself contains NUL characters.
+  - All other *_length fields (hash_index, tree_node, string_pool, file_stream) :
+    PADDED size (already a multiple of 64).
+
 seq:
   - id: global_header
     type: global_header
@@ -60,27 +68,40 @@ types:
         size: 44
 
   block_offset_table:
+    doc: |
+      Stores offsets and lengths of every major section.
+      IMPORTANT: mod_meta_length and boot_json_length are the REAL (unpadded) payload
+      lengths.  The physical blocks are zero-padded to 64-byte boundaries, but the
+      length values here reflect only the meaningful content bytes.  All other
+      *_length fields are already multiples of 64 (padded sizes).
     seq:
       - id: mod_meta_offset
         type: u4
+        doc: Byte offset of the ModMeta JSON region.
       - id: mod_meta_length
         type: u4
+        doc: REAL byte length of the ModMeta JSON payload (not 64-byte-aligned).
       - id: boot_json_offset
         type: u4
+        doc: Byte offset of the boot.json region.
       - id: boot_json_length
         type: u4
+        doc: REAL byte length of the boot.json payload (not 64-byte-aligned).
       - id: hash_index_offset
         type: u4
       - id: hash_index_length
         type: u4
+        doc: Padded size (multiple of 64).
       - id: tree_node_offset
         type: u4
       - id: tree_node_length
         type: u4
+        doc: Padded size (multiple of 64).
       - id: string_pool_offset
         type: u4
       - id: string_pool_length
         type: u4
+        doc: Padded size (multiple of 64).
       - id: file_stream_offset
         type: u4
       - id: file_stream_length
