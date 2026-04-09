@@ -40,13 +40,16 @@ import {
     LocalHeaderMagic,
     MagicNumber,
     ModMetaProtocolVersion,
-    TreeNodeFlags, crypto_stream_chacha20_KEYBYTES, crypto_pwhash_SALTBYTES, crypto_stream_chacha20_NONCEBYTES
+    TreeNodeFlags,
+    crypto_pwhash_SALTBYTES,
+    crypto_stream_chacha20_NONCEBYTES,
+    scrypt_config,
 } from "./ModMetaV2";
 import xxhash, {XXHashAPI} from "xxhash-wasm";
 import JSZip from "jszip";
 
-import argon2 from 'argon2-browser';
 import {xchacha20} from '@noble/ciphers/chacha.js';
+import {scryptAsync} from '@noble/hashes/scrypt.js';
 import {randombytes_buf} from "./randombytes_buf";
 
 // Local Header flags
@@ -292,18 +295,7 @@ export class ModPackerV2 {
         const salt = hasEncrypted ? getRandomBytes(crypto_pwhash_SALTBYTES) : new Uint8Array(crypto_pwhash_SALTBYTES);
         let key: Uint8Array | null = null;
         if (hasEncrypted && options.password) {
-            const kdf = await argon2.hash({
-                pass: options.password,
-                salt,
-                // time: 3,
-                // mem: 1 << 16, // 64 MiB
-                // parallelism: 1,
-                hashLen: crypto_stream_chacha20_KEYBYTES,
-                // type: (argon2 as any).ArgonType?.Argon2id ?? 2, // prefer Argon2id
-            } as any);
-            // argon2-browser returns { hash: ArrayBuffer | Uint8Array }
-            const hashBuf: ArrayBuffer | Uint8Array = (kdf as any).hash;
-            key = hashBuf instanceof Uint8Array ? hashBuf : new Uint8Array(hashBuf);
+            key = await scryptAsync(options.password!, salt, scrypt_config);
         }
 
         // ── 第二步：构建内存中的目录树 ──
@@ -630,7 +622,9 @@ export class ModReaderV2 {
     private _key?: Uint8Array;
     private _hasEncrypted: boolean;
 
-    constructor(buffer: Uint8Array, xxhashApi: XXHashAPI, options?: { password?: string }) {
+    // private password?: string;
+
+    protected constructor(buffer: Uint8Array, xxhashApi: XXHashAPI, options?: { password?: string }) {
         this.buffer = buffer;
         this.view = new DataView(buffer.buffer, buffer.byteOffset, buffer.length);
         this.xxhashApi = xxhashApi;
@@ -664,6 +658,7 @@ export class ModReaderV2 {
         if (hasEncrypted && options?.password) {
             // 同打包端一致的 KDF 参数
             // 注意：argon2-browser 为异步 API，Reader 构造函数为同步，这里将密钥推迟到 create()
+            // this.password = options.password;
         }
 
         // 从 Block Offset Table 中读取各区块的偏移与长度
@@ -690,24 +685,20 @@ export class ModReaderV2 {
         );
     }
 
-    public static async create(buffer: Uint8Array, options?: { password?: string }): Promise<ModReaderV2> {
-        const api = await xxhash();
+    public static async create(
+        buffer: Uint8Array,
+        options?: {
+            password?: string,
+            xxhashApi?: XXHashAPI
+        },
+    ): Promise<ModReaderV2> {
+        const api = options?.xxhashApi ?? await xxhash();
         const reader = new ModReaderV2(buffer, api, options);
         const hasEncrypted = (reader.view.getUint32(0x14, true) & GlobalFlags.HasEncryptedFiles) !== 0;
         if (hasEncrypted) {
             if (!options?.password) throw new Error('Encrypted pack requires password');
             const salt = reader.buffer.subarray(0x34, 0x34 + crypto_pwhash_SALTBYTES);
-            const kdf = await argon2.hash({
-                pass: options.password,
-                salt,
-                // time: 3,
-                // mem: 1 << 16, // 64 MiB
-                // parallelism: 1,
-                hashLen: crypto_stream_chacha20_KEYBYTES,
-                // type: (argon2 as any).ArgonType?.Argon2id ?? 2, // prefer Argon2id
-            } as any);
-            const hashBuf: ArrayBuffer | Uint8Array = (kdf as any).hash;
-            (reader as any)._key = hashBuf instanceof Uint8Array ? hashBuf : new Uint8Array(hashBuf);
+            reader._key = await scryptAsync(options.password!, salt, scrypt_config);
         }
         return reader;
     }
@@ -861,10 +852,11 @@ export class ModConverterV2 {
      * 重新打包为标准 ZIP 格式。
      *
      * @param modPackData V2 封包的二进制数据
+     * @param options
      * @returns ZIP 文件的二进制数据
      */
-    public static async toZip(modPackData: Uint8Array): Promise<Uint8Array> {
-        const reader = await ModReaderV2.create(modPackData);
+    public static async toZip(modPackData: Uint8Array, options?: Parameters<typeof ModReaderV2.create>[1]): Promise<Uint8Array> {
+        const reader = await ModReaderV2.create(modPackData, options);
         const zip = new JSZip();
         const tree = reader.getTree();
         const root = tree.buildJsObjectTree();

@@ -18,13 +18,13 @@ async function test() {
     const bootJson = `{"entry":"a.txt"}\u0000BOOT_TAIL`;
 
     console.log("Packing...");
-    const packed = await packer.pack(files, modMeta, bootJson);
+    const packed = await packer.pack(files, modMeta, bootJson, {password: '123'});
     console.log("Packed size:", packed.length);
 
     await fs.promises.writeFile('test-ModPackV2-packed.modpack', packed);
 
     console.log("Reading...");
-    const reader = new ModReaderV2(packed, api);
+    const reader = await ModReaderV2.create(packed, {password: '123', xxhashApi: api});
 
     // 验证 BlockOffsetTable 中这两个 length 是真实长度，不是 64B 对齐长度
     const view = new DataView(packed.buffer, packed.byteOffset, packed.length);
@@ -59,14 +59,14 @@ async function test() {
     if (!subChildren.includes("b.txt") || !subChildren.includes("inner")) throw new Error("sub children mismatch");
 
     console.log("Testing Converter (toZip)...");
-    const zipData = await ModConverterV2.toZip(packed);
+    const zipData = await ModConverterV2.toZip(packed, {password: '123', xxhashApi: api});
     const zip = await JSZip.loadAsync(zipData);
     const bContent = await zip.file("sub/b.txt")?.async("string");
     if (bContent !== "Hello B") throw new Error("Zip content mismatch for sub/b.txt");
 
     console.log("Testing Converter (fromZip)...");
     const packedFromZip = await ModConverterV2.fromZip(zipData, modMeta, bootJson);
-    const reader2 = new ModReaderV2(packedFromZip, api);
+    const reader2 = await ModReaderV2.create(packedFromZip, {password: '123', xxhashApi: api});
 
     const blockIdxB = reader2.findFile("sub/b.txt");
     if (blockIdxB === null) {

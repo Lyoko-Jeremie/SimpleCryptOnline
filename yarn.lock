@@ -315,6 +315,13 @@ __metadata:
   languageName: node
   linkType: hard
 
+"@noble/hashes@npm:^2.0.1":
+  version: 2.0.1
+  resolution: "@noble/hashes@npm:2.0.1"
+  checksum: aea67a671ca464027cd512d07666a804bd99abc343ba98c93ee8463a1c870c5594f8de468279ef3c60f3b23b6330db9f1a92bd23723b8a911ec73bddc9420248
+  languageName: node
+  linkType: hard
+
 "@nodelib/fs.scandir@npm:2.1.5":
   version: 2.1.5
   resolution: "@nodelib/fs.scandir@npm:2.1.5"
@@ -1569,6 +1576,7 @@ __metadata:
   resolution: "SimpleCryptOnline@workspace:."
   dependencies:
     "@noble/ciphers": ^2.1.1
+    "@noble/hashes": ^2.0.1
     "@stablelib/random": ^2.0.1
     "@stablelib/xchacha20": ^2.0.1
     "@types/argon2-browser": ^1.18.4
@@ -1579,7 +1587,7 @@ __metadata:
     "@webpack-cli/generators": ^3.0.7
     argon2-browser: ^1.18.0
     base64-loader: ^1.0.0
-    bcryptjs: ^3.0.2
+    bcryptjs: ^3.0.3
     bootstrap: ^5.3.1
     bson: ^6.10.4
     core-js: ^3.44.0
@@ -1595,6 +1603,7 @@ __metadata:
     nodemon: ^3.0.1
     sass: ^1.66.1
     sass-loader: ^13.3.2
+    scrypt-js: ^3.0.1
     style-loader: ^3.3.3
     ts-chacha20: ^1.2.0
     ts-loader: ^9.4.4
@@ -1950,12 +1959,12 @@ __metadata:
   languageName: node
   linkType: hard
 
-"bcryptjs@npm:^3.0.2":
-  version: 3.0.2
-  resolution: "bcryptjs@npm:3.0.2"
+"bcryptjs@npm:^3.0.3":
+  version: 3.0.3
+  resolution: "bcryptjs@npm:3.0.3"
   bin:
     bcrypt: bin/bcrypt
-  checksum: 91f878f184e8b627678bd13bd1d4fb576f9d95da98955a973436c949f68056953f131f4cced64adaa73f4c4946d6a69096368a29bd7252b4eb120b3e592d661d
+  checksum: 326dfbd0e2e397cf2f85abcf8b523f098a804a76303c983e86a4554462b8a5db930c06fd71148e060160bcfc1165676f917dc78c15bd68af8dcd0ef4a208ba20
   languageName: node
   linkType: hard
 
@@ -7275,6 +7284,13 @@ __metadata:
   version: 2.1.0
   resolution: "scoped-regex@npm:2.1.0"
   checksum: 4e820444cb79727bb302d94dafe07999cce18b6026e4866583466821b3d246403034bc46085e1f4b63ec99491b637540a7c74fb2a66c5c4287700ec357d8af86
+  languageName: node
+  linkType: hard
+
+"scrypt-js@npm:^3.0.1":
+  version: 3.0.1
+  resolution: "scrypt-js@npm:3.0.1"
+  checksum: b7c7d1a68d6ca946f2fbb0778e0c4ec63c65501b54023b2af7d7e9f48fdb6c6580d6f7675cd53bda5944c5ebc057560d5a6365079752546865defb3b79dea454
   languageName: node
   linkType: hard
 
