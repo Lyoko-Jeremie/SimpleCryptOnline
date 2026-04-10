@@ -23,6 +23,11 @@
 
 import std.mem;
 import std.string;
+import std.core;
+
+#ifdef __IMHEX__
+import hex.core;
+#endif
 
 // ─── Bitfields ───────────────────────────────────────────────────────────────
 
@@ -162,7 +167,24 @@ struct LocalHeader {
 struct FileStreamEntry {
     LocalHeader header;
     u8 data[header.real_length]
-                                  [[comment("File payload — plaintext or XChaCha20 ciphertext")]];
+                                  [[
+                                    comment("File payload — plaintext or XChaCha20 ciphertext"),
+                                    vfs_path(header.full_path)
+                                  ]];
+
+    if (header.flags.is_encrypted) {
+        // If the file is encrypted, we could potentially use hex::core::add_virtual_file
+        // to provide a decrypted view once we have the decryption logic in the pattern.
+        // For now, we've registered the raw (encrypted) data to the VFS via vfs_path.
+        #ifdef __IMHEX__
+        hex::core::add_virtual_file(std::string::to_string(header.full_path), data);
+        #endif
+    } else {
+        #ifdef __IMHEX__
+        hex::core::add_virtual_file(std::string::to_string(header.full_path), data);
+        #endif
+    }
+
     u8 data_padding[(64 - (header.real_length % 64)) % 64]
                                   [[comment("Zero padding — aligns next Local Header to 64-byte boundary")]];
 } [[comment("File stream entry (Local Header + payload + padding)")]];
@@ -174,18 +196,28 @@ BlockOffsetTable block_offsets @ 0x80;
 
 // ── ModMeta JSON ──────────────────────────────────────────────────────────────
 // Real (unpadded) payload; physical region is zero-padded to 64-byte boundary.
-char mod_meta_json[block_offsets.mod_meta_length] @ block_offsets.mod_meta_offset
+u8 mod_meta_json[block_offsets.mod_meta_length] @ block_offsets.mod_meta_offset
     [[
         color("2ECC71"),
-        comment("ModMeta JSON payload (real length; trailing zeros are padding)")
+        comment("ModMeta JSON payload (real length; trailing zeros are padding)"),
+        vfs_path("mod-meta.json")
     ]];
 
+#ifdef __IMHEX__
+hex::core::add_virtual_file("mod-meta.json", mod_meta_json);
+#endif
+
 // ── boot.json ─────────────────────────────────────────────────────────────────
-char boot_json_str[block_offsets.boot_json_length] @ block_offsets.boot_json_offset
+u8 boot_json_str[block_offsets.boot_json_length] @ block_offsets.boot_json_offset
     [[
         color("27AE60"),
-        comment("boot.json payload (real length; trailing zeros are padding)")
+        comment("boot.json payload (real length; trailing zeros are padding)"),
+        vfs_path("boot.json")
     ]];
+
+#ifdef __IMHEX__
+hex::core::add_virtual_file("boot.json", boot_json_str);
+#endif
 
 // ── Hash Index Array ──────────────────────────────────────────────────────────
 // Entry count = padded_length / 16 (each entry is 16 bytes).
