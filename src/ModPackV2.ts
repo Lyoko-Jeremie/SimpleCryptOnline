@@ -760,14 +760,15 @@ export class ModReaderV2 {
         if (this._key) {
             // 填充文件流部分为 0 = 未解密
             this.decryptedBlockBitmap.fill(0, this.offsets.fileStreamOffset / BlockSize, (this.offsets.fileStreamOffset + this.offsets.fileStreamLength) / BlockSize);
-            // 遍历文件树，将已解密的文件块标记为已解密
-            const tree = this.tree.buildJsObjectTree();
-            for (const file of tree) {
-                if (file.isEncrypted) {
-                    const blockIdx = file.offset / BlockSize;
-                    this.decryptedBlockBitmap.fill(1, blockIdx, blockIdx + Math.ceil(file.length / BlockSize));
-                }
-            }
+            // // 遍历文件树，将已解密的文件块标记为已解密
+            // const tree = this.tree.buildJsObjectTree();
+            // traverseJsFileNode(tree);
+            // for (const file of tree) {
+            //     if (file.isEncrypted) {
+            //         const blockIdx = file.offset / BlockSize;
+            //         this.decryptedBlockBitmap.fill(1, blockIdx, blockIdx + Math.ceil(file.length / BlockSize));
+            //     }
+            // }
         }
     }
 
@@ -860,12 +861,13 @@ export class ModReaderV2 {
         const storedHash = this.view.getBigUint64(hashOffset, true);
         // File Data 起始位置 = Local Header 起始 + 对齐后的头部大小（20 + nameLen）
         const dataStart = offset + this.alignToBlockSize(20 + nameLen);
+        const blockStart = Math.ceil(dataStart / BlockSize);
         if (dataStart + realLen > this.buffer.length) throw new Error(`Read out of bounds`);
         // Uint8Array view of the file data (maybe encrypted)
-        const slice = this.buffer.subarray(dataStart, dataStart + realLen);
-        const endBlockIdx = blockIdx + Math.ceil(realLen / BlockSize);
+        // const slice = this.buffer.subarray(dataStart, dataStart + realLen);
+        const blockEnd = Math.ceil((dataStart + realLen) / BlockSize);
 
-        let plain = slice;
+        // let plain = slice;
         const hasEncrypted = (this.view.getUint32(0x14, true) & GlobalFlags.HasEncryptedFiles) !== 0;
         if ((flags & LH_FLAG_ENCRYPTED) && hasEncrypted) {
             const key: Uint8Array | undefined = this._key;
@@ -874,17 +876,26 @@ export class ModReaderV2 {
 
             // plain = xchacha20(key, nonce, slice, undefined, blockIdx);
 
-            // TODO 改为逐块解密并标注为已解密块，避免大文件拷贝
-            for (let i = blockIdx; i < endBlockIdx; i++) {
-                plain = xchacha20(key, nonce, slice, undefined, blockIdx);
+            // 改为逐块解密并标注为已解密块，避免大文件拷贝
+            for (let i = blockStart; i < blockEnd; i++) {
+                const startI = i;
+                const endI = i + 1;
+
+                const slice = this.buffer.subarray(startI * BlockSize, endI * BlockSize);
+                // const plain = xchacha20(key, nonce, slice, undefined, startI);
+                // slice.set(plain, 0);
+
+                // 就地操作模式
+                xchacha20(key, nonce, slice, slice, startI);
 
                 // 标记该块已解密
-                this.decryptedBlockBitmap.fill(1, blockIdx, blockIdx + Math.ceil(plain.length / BlockSize));
+                this.decryptedBlockBitmap.fill(1, startI, endI);
             }
 
             // 标记该文件已解密
             this.view.setUint16(offset + 10, flags & ~LH_FLAG_ENCRYPTED, true);
         }
+        const plain = this.buffer.subarray(dataStart, dataStart + realLen);
         const calcHash = this.xxhashApi.h64Raw(plain, BigInt(0));
         if (calcHash !== storedHash) throw new Error('File integrity check failed (xxHash64 mismatch)');
         return plain;
