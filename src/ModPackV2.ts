@@ -639,6 +639,20 @@ export class ModPackerV2 {
     }
 }
 
+export interface ReadFileHeaderResult {
+    startOffset: number;
+    blockStart: number;
+    blockEnd: number;
+    dataStart: number;
+    dataEnd: number;
+    realLen: number;
+    flags: number;
+    hashOffset: number;
+    storedHash: bigint;
+    nameLen: number;
+    pathName: string;
+}
+
 /**
  * ModReaderV2 — V2 封包文件读取器
  *
@@ -843,18 +857,10 @@ export class ModReaderV2 {
         return this.normalizePath(path) === expectedPath;
     }
 
-    /**
-     * 根据 Block Index 读取文件数据
-     *
-     * 从 Local Header 中解析路径长度和真实数据长度，
-     * 然后跳过 Local Header（对齐到 64 字节边界）读取 File Data。
-     *
-     * @param blockIdx 文件对应的 Local Header 块编号（由 findFile 或 Tree 获得）
-     * @returns 文件原始数据的 Uint8Array 子视图（零拷贝）
-     */
-    public readFile(blockIdx: number): Uint8Array {
+    protected readFileHeader(blockIdx: number): ReadFileHeaderResult {
         const offset = blockIdx * BlockSize;
         const nameLen = this.view.getUint16(offset + 4, true);
+        const pathName = this.decoder.decode(this.buffer.subarray(offset + 12, offset + 12 + nameLen));
         const realLen = this.view.getUint32(offset + 6, true);
         const flags = this.view.getUint16(offset + 10, true);
         const hashOffset = offset + 12 + nameLen;
@@ -865,7 +871,58 @@ export class ModReaderV2 {
         if (dataStart + realLen > this.buffer.length) throw new Error(`Read out of bounds`);
         // Uint8Array view of the file data (maybe encrypted)
         // const slice = this.buffer.subarray(dataStart, dataStart + realLen);
+        const dataEnd = dataStart + realLen;
         const blockEnd = Math.ceil((dataStart + realLen) / BlockSize);
+        return {
+            startOffset: offset,
+            blockStart,
+            blockEnd,
+            dataStart,
+            dataEnd,
+            realLen,
+            flags,
+            hashOffset,
+            storedHash,
+            nameLen,
+            pathName,
+        };
+    }
+
+    /**
+     * 根据 Block Index 读取文件数据
+     *
+     * 从 Local Header 中解析路径长度和真实数据长度，
+     * 然后跳过 Local Header（对齐到 64 字节边界）读取 File Data。
+     *
+     * @param blockIdx 文件对应的 Local Header 块编号（由 findFile 或 Tree 获得）
+     * @returns 文件原始数据的 Uint8Array 子视图（零拷贝）
+     */
+    public readFile(blockIdx: number): Uint8Array {
+        const {
+            blockStart,
+            blockEnd,
+            dataStart,
+            realLen,
+            flags,
+            hashOffset,
+            storedHash,
+            nameLen,
+            pathName,
+        } = this.readFileHeader(blockIdx);
+
+        const offset = blockIdx * BlockSize;
+        // const nameLen = this.view.getUint16(offset + 4, true);
+        // const realLen = this.view.getUint32(offset + 6, true);
+        // const flags = this.view.getUint16(offset + 10, true);
+        // const hashOffset = offset + 12 + nameLen;
+        // const storedHash = this.view.getBigUint64(hashOffset, true);
+        // File Data 起始位置 = Local Header 起始 + 对齐后的头部大小（20 + nameLen）
+        // const dataStart = offset + this.alignToBlockSize(20 + nameLen);
+        // const blockStart = Math.ceil(dataStart / BlockSize);
+        // if (dataStart + realLen > this.buffer.length) throw new Error(`Read out of bounds`);
+        // Uint8Array view of the file data (maybe encrypted)
+        // const slice = this.buffer.subarray(dataStart, dataStart + realLen);
+        // const blockEnd = Math.ceil((dataStart + realLen) / BlockSize);
 
         // let plain = slice;
         const hasEncrypted = (this.view.getUint32(0x14, true) & GlobalFlags.HasEncryptedFiles) !== 0;
@@ -906,6 +963,49 @@ export class ModReaderV2 {
         const calcHash = this.xxhashApi.h64Raw(plain, BigInt(0));
         if (calcHash !== storedHash) throw new Error('File integrity check failed (xxHash64 mismatch)');
         return plain;
+    }
+
+    /**
+     * 获取到文件的就地访问信息
+     * @param path  文件名
+     * @return 文件不存在或无法就地操作时返回 undefined 。 否则返回：包括文件头和定位信息，以及数据块视图。此数据块视图直接引用原始内存地址，对其进行修改将直接修改原始内存。
+     */
+    public accessFileInplace(path: string,): undefined | ({
+        blockIdx: number,
+        dataView: Uint8Array,
+    } & ReadFileHeaderResult) {
+        const blockIdx = this.findFile(path);
+        if (blockIdx === null) return undefined;
+        this.readFile(blockIdx);
+        const {
+            startOffset,
+            blockStart,
+            blockEnd,
+            dataStart,
+            dataEnd,
+            realLen,
+            flags,
+            hashOffset,
+            storedHash,
+            nameLen,
+            pathName,
+        } = this.readFileHeader(blockIdx);
+        const dataView = this.buffer.subarray(dataStart, dataStart + realLen);
+        return {
+            blockIdx,
+            dataView,
+            startOffset,
+            blockStart,
+            blockEnd,
+            dataStart,
+            dataEnd,
+            realLen,
+            flags,
+            hashOffset,
+            storedHash,
+            nameLen,
+            pathName,
+        };
     }
 
     /** 将大小向上对齐到 BlockSize 字节边界 */
