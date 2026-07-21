@@ -894,6 +894,7 @@ export class ModReaderV2 {
 
             const slice = this.buffer.subarray(blockStart * BlockSize, blockEnd * BlockSize);
             // 就地操作模式
+            // https://github.com/paulmillr/noble-ciphers#reuse-array-for-input-and-output
             xchacha20(key, nonce, slice, slice, blockStart);
             // 标记该块已解密
             this.decryptedBlockBitmap.fill(1, blockStart, blockEnd);
