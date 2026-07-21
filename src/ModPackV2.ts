@@ -877,20 +877,26 @@ export class ModReaderV2 {
             // plain = xchacha20(key, nonce, slice, undefined, blockIdx);
 
             // 改为逐块解密并标注为已解密块，避免大文件拷贝
-            for (let i = blockStart; i < blockEnd; i++) {
-                const startI = i;
-                const endI = i + 1;
+            // for (let i = blockStart; i < blockEnd; i++) {
+            //     const startI = i;
+            //     const endI = i + 1;
+            //
+            //     const slice = this.buffer.subarray(startI * BlockSize, endI * BlockSize);
+            //     // const plain = xchacha20(key, nonce, slice, undefined, startI);
+            //     // slice.set(plain, 0);
+            //
+            //     // 就地操作模式
+            //     xchacha20(key, nonce, slice, slice, startI);
+            //
+            //     // 标记该块已解密
+            //     this.decryptedBlockBitmap.fill(1, startI, endI);
+            // }
 
-                const slice = this.buffer.subarray(startI * BlockSize, endI * BlockSize);
-                // const plain = xchacha20(key, nonce, slice, undefined, startI);
-                // slice.set(plain, 0);
-
-                // 就地操作模式
-                xchacha20(key, nonce, slice, slice, startI);
-
-                // 标记该块已解密
-                this.decryptedBlockBitmap.fill(1, startI, endI);
-            }
+            const slice = this.buffer.subarray(blockStart * BlockSize, blockEnd * BlockSize);
+            // 就地操作模式
+            xchacha20(key, nonce, slice, slice, blockStart);
+            // 标记该块已解密
+            this.decryptedBlockBitmap.fill(1, blockStart, blockEnd);
 
             // 标记该文件已解密
             this.view.setUint16(offset + 10, flags & ~LH_FLAG_ENCRYPTED, true);
