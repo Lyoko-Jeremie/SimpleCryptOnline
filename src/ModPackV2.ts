@@ -88,6 +88,30 @@ export interface JsFileNode {
 }
 
 /**
+ * 遍历 JsFileNode 树，执行回调函数
+ * @param node
+ * @param callback
+ * @param currentPath
+ */
+export function traverseJsFileNode(node: JsFileNode, callback: (node: JsFileNode, path: string) => void, currentPath: string = "") {
+    const stack: Array<{ node: JsFileNode; path: string }> = [{node, path: currentPath}];
+
+    while (stack.length > 0) {
+        const current = stack.pop()!;
+        callback(current.node, current.path);
+
+        if (current.node.children) {
+            for (const childName in current.node.children) {
+                stack.push({
+                    node: current.node.children[childName],
+                    path: current.path + "/" + childName,
+                });
+            }
+        }
+    }
+}
+
+/**
  * ZeroCopyTree — 零拷贝目录树视图
  *
  * 直接操作 Tree Node Array 和 String Pool 的二进制缓冲区，
@@ -196,40 +220,61 @@ export class ZeroCopyTree {
     /**
      * 从零拷贝视图中提取完整的 JavaScript 嵌套对象树
      *
-     * 递归遍历 Tree Node Array，生成常规 JS 对象树（JsFileNode）。
+     * 使用显式栈遍历 Tree Node Array，生成常规 JS 对象树（JsFileNode）。
      * 适用于需要完整树结构的场景（如 UI 文件浏览器）。
      *
      * @param nodeIndex 起始节点索引（默认 0 = 根目录）
      */
     public buildJsObjectTree(nodeIndex: number = 0): JsFileNode {
-        const offset = nodeIndex * 32;
-        const flags = this.treeData.getUint16(offset + 6, true);
-        const isDir = (flags & 1) === 1;
+        const readNode = (index: number) => {
+            const offset = index * 32;
+            const flags = this.treeData.getUint16(offset + 6, true);
+            const isDir = (flags & 1) === 1;
+            // target_index / target_size 的含义取决于节点类型
+            const targetIndex = this.treeData.getUint32(offset + 12, true);
+            const targetSize = this.treeData.getUint32(offset + 16, true);
+            const node: JsFileNode = {
+                name: this.readLocalName(index),
+                isFile: !isDir,
+                ...(isDir
+                    // 目录: targetIndex = 子节点起始下标, targetSize = 子节点数量
+                    ? {children: {}}
+                    // 文件: targetIndex = Local Header 块编号, targetSize = 真实字节长度
+                    : {blockIndex: targetIndex, size: targetSize})
+            };
 
-        const node: JsFileNode = {
-            name: this.readLocalName(nodeIndex),
-            isFile: !isDir
+            return {node, isDir, childStart: targetIndex, childEnd: targetIndex + targetSize};
         };
 
-        // target_index / target_size 的含义取决于节点类型
-        const targetIndex = this.treeData.getUint32(offset + 12, true);
-        const targetSize = this.treeData.getUint32(offset + 16, true);
+        const root = readNode(nodeIndex);
+        if (!root.isDir) return root.node;
 
-        if (isDir) {
-            // 目录: targetIndex = 子节点起始下标, targetSize = 子节点数量
-            node.children = {};
-            for (let i = 0; i < targetSize; i++) {
-                const childNodeIndex = targetIndex + i;
-                const childObj = this.buildJsObjectTree(childNodeIndex);
-                node.children[childObj.name] = childObj;
+        const stack = [{
+            children: root.node.children!,
+            next: root.childStart,
+            end: root.childEnd
+        }];
+
+        while (stack.length > 0) {
+            const current = stack[stack.length - 1];
+            if (current.next >= current.end) {
+                stack.pop();
+                continue;
             }
-        } else {
-            // 文件: targetIndex = Local Header 块编号, targetSize = 真实字节长度
-            node.blockIndex = targetIndex;
-            node.size = targetSize;
+
+            const child = readNode(current.next++);
+            current.children[child.node.name] = child.node;
+
+            if (child.isDir) {
+                stack.push({
+                    children: child.node.children!,
+                    next: child.childStart,
+                    end: child.childEnd
+                });
+            }
         }
 
-        return node;
+        return root.node;
     }
 }
 
@@ -622,6 +667,8 @@ export class ModReaderV2 {
     private _key?: Uint8Array;
     private _hasEncrypted: boolean;
 
+    private decryptedBlockBitmap: Uint8Array;
+
     // private password?: string;
 
     protected constructor(buffer: Uint8Array, xxhashApi: XXHashAPI, options?: { password?: string }) {
@@ -683,6 +730,11 @@ export class ModReaderV2 {
             this.buffer.subarray(this.offsets.treeNodeOffset, this.offsets.treeNodeOffset + this.offsets.treeNodeLength),
             this.buffer.subarray(this.offsets.stringPoolOffset, this.offsets.stringPoolOffset + this.offsets.stringPoolLength)
         );
+
+        // 已解密块位图
+        this.decryptedBlockBitmap = new Uint8Array(Math.ceil(this.buffer.length / BlockSize));
+        this.decryptedBlockBitmap.fill(1); // 0 = 未解密，1 = 已解密
+
     }
 
     public static async create(
@@ -699,8 +751,24 @@ export class ModReaderV2 {
             if (!options?.password) throw new Error('Encrypted pack requires password');
             const salt = reader.buffer.subarray(0x34, 0x34 + crypto_pwhash_SALTBYTES);
             reader._key = await scryptAsync(options.password!, salt, scrypt_config);
+
         }
         return reader;
+    }
+
+    protected initDecryptedBlockBitmap() {
+        if (this._key) {
+            // 填充文件流部分为 0 = 未解密
+            this.decryptedBlockBitmap.fill(0, this.offsets.fileStreamOffset / BlockSize, (this.offsets.fileStreamOffset + this.offsets.fileStreamLength) / BlockSize);
+            // 遍历文件树，将已解密的文件块标记为已解密
+            const tree = this.tree.buildJsObjectTree();
+            for (const file of tree) {
+                if (file.isEncrypted) {
+                    const blockIdx = file.offset / BlockSize;
+                    this.decryptedBlockBitmap.fill(1, blockIdx, blockIdx + Math.ceil(file.length / BlockSize));
+                }
+            }
+        }
     }
 
     /** 路径标准化：反斜杠转正斜杠，去除前导/后置斜杠 */
@@ -791,9 +859,11 @@ export class ModReaderV2 {
         const hashOffset = offset + 12 + nameLen;
         const storedHash = this.view.getBigUint64(hashOffset, true);
         // File Data 起始位置 = Local Header 起始 + 对齐后的头部大小（20 + nameLen）
-        const dataStart = offset + this.alignTo64(20 + nameLen);
+        const dataStart = offset + this.alignToBlockSize(20 + nameLen);
         if (dataStart + realLen > this.buffer.length) throw new Error(`Read out of bounds`);
+        // Uint8Array view of the file data (maybe encrypted)
         const slice = this.buffer.subarray(dataStart, dataStart + realLen);
+        const endBlockIdx = blockIdx + Math.ceil(realLen / BlockSize);
 
         let plain = slice;
         const hasEncrypted = (this.view.getUint32(0x14, true) & GlobalFlags.HasEncryptedFiles) !== 0;
@@ -801,16 +871,28 @@ export class ModReaderV2 {
             const key: Uint8Array | undefined = this._key;
             if (!key) throw new Error('Password not provided for encrypted pack');
             const nonce: Uint8Array = this._nonce;
-            plain = xchacha20(key, nonce, slice, undefined, blockIdx);
+
+            // plain = xchacha20(key, nonce, slice, undefined, blockIdx);
+
+            // TODO 改为逐块解密并标注为已解密块，避免大文件拷贝
+            for (let i = blockIdx; i < endBlockIdx; i++) {
+                plain = xchacha20(key, nonce, slice, undefined, blockIdx);
+
+                // 标记该块已解密
+                this.decryptedBlockBitmap.fill(1, blockIdx, blockIdx + Math.ceil(plain.length / BlockSize));
+            }
+
+            // 标记该文件已解密
+            this.view.setUint16(offset + 10, flags & ~LH_FLAG_ENCRYPTED, true);
         }
         const calcHash = this.xxhashApi.h64Raw(plain, BigInt(0));
         if (calcHash !== storedHash) throw new Error('File integrity check failed (xxHash64 mismatch)');
         return plain;
     }
 
-    /** 将大小向上对齐到 64 字节边界 */
-    private alignTo64(size: number): number {
-        return Math.ceil(size / 64) * 64;
+    /** 将大小向上对齐到 BlockSize 字节边界 */
+    private alignToBlockSize(size: number): number {
+        return Math.ceil(size / BlockSize) * BlockSize;
     }
 }
 
