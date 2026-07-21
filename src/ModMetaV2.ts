@@ -24,7 +24,7 @@ export const BLOCK_OFFSET_TABLE_SIZE = 128;
 export enum GlobalFlags {
     None = 0,
     HasEncryptedFiles = 0x1,
-    HasCompression = 0x2,
+    // HasCompression = 0x2,
 }
 
 // Tree Node Flags
